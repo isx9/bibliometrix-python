@@ -205,86 +205,95 @@ It is used to verify that our ETL pipeline produces all required columns and to 
 5) issues found 
 6) relevant for ETL: yes/no
 
+
+
 ### get_affiliationproductionovertime.py
-1) Counts cumulative publications per institution over time, picks the top-k institutions, and draws a line chart showing how each institution's output grew year by year.
-2) **www.services** (provides `pd`, `px`, `go`).
+1) Counts cumulative publications per institution over time and draws a line chart for the top-k institutions.
+2) **www.services**.
 3) **AU_UN**, **PY**.
-4) **No** explicit WoS-only logic, but `AU_UN` (institution name) is a column that only WoS produces natively. Other sources will not have it unless the ETL builds it from `C1`.
-5) `AU_UN` is expected to be a list of institution names per row — if it is a plain text string instead, the function will process it letter by letter and produce wrong results silently. `PY` is not checked for null values before use.
-6) **Yes**. `AU_UN` must be a list of strings per row, and `PY` must be non-null and a whole number. The ETL must build `AU_UN` from `C1` if the source is not WoS.
-   
+4) **No**, but `AU_UN` is only produced by WoS natively.
+5) Crashes if `AU_UN` is a plain string instead of a list, or if `PY` contains nulls.
+6) **Yes**. `AU_UN` must be a `list[str]` per row, `PY` must be non-null and numeric. The ETL must build `AU_UN` from `C1` for non-WoS sources.
+
 ### get_annualproduction.py
-1) Counts how many scientific papers were published each year, fills in years with zero publications, and draws a line chart (year vs. number of articles).
-2) **www.services** (provides `pd`, `px`, `go`).
-3) **PY** only.
-4) **No** explicit WoS-only logic, but the column name `PY` (Publication Year) comes from WoS. Sources using a different name will break the function.
-5) `PY` is never converted to a number before use — if it contains text or empty values the function will crash. No protection against an empty dataset.
-6) **Yes**. `PY` must be present, non-null, and a whole number (int).
+1) Counts how many papers were published each year and draws a line chart.
+2) **www.services**.
+3) **PY**.
+4) **No**.
+5) Crashes if `PY` is missing, non-numeric, or contains nulls.
+6) **Yes**. `PY` must be present, non-null, and numeric.
+
 
 ### get_authorlocalimpact.py
-1) Calculates impact scores (h-index, g-index, m-index, total citations, number of papers) for each author, ranks them by the chosen metric, and draws a bubble chart of the top authors.
-2) **www.services** (provides `pd`, `px`, `go`, `np`).
+1) Calculates impact scores (h-index, g-index, m-index, total citations) for each author and draws a bubble chart of the top authors.
+2) **www.services**.
 3) **AU**, **TC**, **PY**.
-4) **No** explicit WoS-only logic, but `AU` is expected in WoS author format.
-5) `AU` is never checked before splitting — if it is a plain text string instead of a list, the function will produce wrong results silently. The internal index calculation functions (`h_calc`, `g_calc`) are applied incorrectly, which may produce wrong scores. The docstring contains wrong parameter names, suggesting copy-paste errors.
-6) **Yes**. `AU` must be a list of strings, `TC` must be a whole number, and `PY` must be non-null and numeric.
+4) **No**.
+5) Crashes if `AU` is not a list. Index calculations may produce wrong results due to incorrect use of `transform`.
+6) **Yes**. `AU` must be a `list[str]`, `TC` and `PY` must be non-null and numeric.
+
 
 ### get_authorproductionovertime.py
-1) Counts publications and citations per author per year, picks the top-k authors, and draws a scatter plot (author vs. year, dot size = number of publications). Also returns two summary tables: one by author/year and one with full document details.
-2) **www.services** (provides `pd`, `px`, `go`).
-3) **AU**, **PY**, **TC** (core — function breaks without these); **TI**, **SO**, **DI** (secondary — only used for the document table, missing ones are handled with a warning).
-4) **No** explicit WoS-only logic, but the fallback author splitting uses a comma, which is WoS-specific. Scopus uses semicolons, so author names would be wrong for other sources.
-5) The comma-based author splitting silently produces wrong names for non-WoS sources. If `DI` is named differently (e.g. `DOI`), the document table will be empty with only a printed warning instead of a clear error.
-6) **Yes**. `AU` must be a list of strings, `PY` and `TC` must be numeric, and `TI`, `SO`, `DI` must be present as text strings.
+1) Counts publications and citations per author per year and draws a scatter plot for the top-k authors.
+2) **www.services**.
+3) **AU**, **PY**, **TC** (core); **TI**, **SO**, **DI** (secondary — used for the document table, missing ones handled with a warning).
+4) **No**, but the fallback author splitting uses a comma which is WoS-specific.
+5) Wrong author names for non-WoS sources due to comma-based splitting. Missing `DI` silently returns an empty document table.
+6) **Yes**. `AU` must be a `list[str]`, `PY` and `TC` must be numeric, `TI`, `SO`, `DI` must be present as strings.
+
 
 ### get_averagecitations.py
-1) Calculates the average number of citations per year for each publication year, draws a line chart showing how citation impact evolves over time, and returns a summary table with number of articles, mean citations per article, and mean citations per year for each publication year.
-2) **www.services** (provides `pd`, `px`, `go`).
+1) Calculates average citations per year and draws a line chart.
+2) **www.services**.
 3) **PY**, **TC**.
-4) **No** explicit DB checks.
-5) If `PY` or `TC` are missing the function crashes immediately on the `groupby`. Division by zero is possible if `PY` equals `current_year`, since `CitableYears` would be zero. Neither column is converted to a number before use, so text or null values will cause wrong results or a crash.
-6) **Yes**. `PY` and `TC` must both be present, non-null, and numeric. `TC` should default to `0` when missing and `PY` must be a valid 4-digit year.
-   
+4) **No**.
+5) Crashes if `PY` or `TC` are missing or non-numeric. Division by zero possible if `PY` equals the current year.
+6) **Yes**. `PY` and `TC` must be present, non-null, and numeric.
+
+
 ### get_bradfordlaw.py
-1) Applies Bradford's Law to identify the core journals of a research field. It ranks journals by number of publications, divides them into three zones of equal contribution, and draws a log-scale line chart highlighting the "core sources" zone. Also returns a table with each journal's rank, frequency, cumulative frequency, and zone assignment.
-2) **www.services** (provides `pd`, `go`, `np`).
-3) **SO** only.
-4) **No** explicit DB checks.
-5) If `SO` is missing it crashes immediately on `value_counts()`. If `SO` contains null values they are silently ignored, potentially skewing the zone boundaries. If all publications belong to a single source the zone index slicing may produce incorrect results.
-6) **Yes**. `SO` must be present, non-null, and a text string representing the journal or source name.
-   
+1) Applies Bradford's Law to rank journals by publications, divides them into three zones, and draws a log-scale chart highlighting the core journals.
+2) **www.services**.
+3) **SO**.
+4) **No**.
+5) Crashes if `SO` is missing. Null values in `SO` are silently ignored, potentially skewing zone boundaries.
+6) **Yes**. `SO` must be present, non-null, and a string.
+
+
 ### get_citedcountries.py
-1) Ranks countries by total or average citations, draws a dot chart of the top-k countries, and returns a summary table. The country of each paper is extracted from the first author's affiliation via `metaTagExtraction`, which adds a new column `AU1_CO` to the DataFrame before the ranking is computed.
-2) **www.services** (provides `pd`, `go`).
-3) **TC** (core); **C1** or **RP** (secondary — not accessed directly here but required by `metaTagExtraction` to extract the country).
-4) **Yes**. `metaTagExtraction` is built to parse WoS-style affiliation strings. Data from other sources formatted differently will likely produce empty or wrong country values.
-5) If `C1` or `RP` are missing or wrongly formatted, `AU1_CO` will be empty and the chart will show nothing with no clear error. `TC` is never converted to a number before the groupby aggregation, so text or null values will cause wrong results or a crash.
-6) **Yes**. `TC` must be present, non-null, and numeric. `C1` or `RP` must be populated in a format that `metaTagExtraction` can read correctly, otherwise no country data will be produced.
-   
+1) Ranks countries by total or average citations and draws a dot chart of the top-k countries.
+2) **www.services**.
+3) **TC** (core); **C1** or **RP** (secondary — needed by `metaTagExtraction` to extract the country).
+4) **Yes**. `metaTagExtraction` is built for WoS-style affiliation strings.
+5) If `C1` or `RP` are missing or wrongly formatted, the chart will be empty with no clear error. `TC` non-numeric values will cause a crash.
+6) **Yes**. `TC` must be numeric and non-null. `C1` or `RP` must be populated correctly for country extraction to work.
+
 
 ### get_citeddocuments.py
-1) Finds the most cited papers in the dataset, ranks them by total citations or citations per year, draws a dot chart of the top-k documents, and returns a summary table. Each paper is identified by its short reference key `SR`, which must already be present in the DataFrame before this function is called.
-2) **www.services** (provides `pd`, `go`).
-3) **SR**, **TC**, **PY** (core); **DI** (secondary — included in the output table but the chart works without it).
-4) **No** explicit DB checks, but `SR` is expected in WoS format ("FirstAuthor, Year, Journal"). If `SR` is missing or wrongly formatted the groupby will produce empty or wrong results.
-5) If `SR` is missing the function produces an empty chart with no clear error. `TC` and `PY` are used directly in calculations without being converted to numbers first — null or text values will cause a crash. Division by zero is possible if `PY` equals `current_year + 1`.
-6) **Yes**. `SR` must be present and correctly built by the ETL pipeline, `TC` must be numeric and non-null, `PY` must be a valid 4-digit year, and `DI` should be present as a text string for the output table to be complete.
+1) Ranks papers by total citations or citations per year and draws a dot chart of the top-k documents.
+2) **www.services**.
+3) **SR**, **TC**, **PY** (core); **DI** (secondary — included in the output table).
+4) **No**, but `SR` is expected in WoS format.
+5) Empty chart with no error if `SR` is missing. Crashes if `TC` or `PY` are non-numeric. Division by zero possible if `PY` equals current year.
+6) **Yes**. `SR` must be correctly built by the ETL, `TC` and `PY` must be numeric, `DI` should be present as a string.
+
+---
 
 ### get_clusteringcoupling.py
-1) Groups papers or authors into clusters based on how many references or keywords they share, the more two papers cite the same sources, the closer they are in the network. It then draws an interactive network graph where each bubble is a document or author, bubbles of the same color belong to the same research cluster, and the thickness of the lines between them shows how strongly they are connected. The actual clustering logic is handled by a separate function called `couplingMap`, while this file takes care of the visual layout and saves the final network as an interactive HTML file.
-2) **www.services** (provides `go`, `np`, `os`, `tempfile`, `ig`); **couplingMap** (does all the clustering computation); **avoid_net_overlaps** (prevents node labels from overlapping in the chart).
+1) Groups papers or authors into clusters based on shared references or keywords and draws an interactive network. Saves the result as an HTML file.
+2) **www.services**; **couplingMap**, **avoid_net_overlaps**.
 3) **None directly** — all column access is delegated to `couplingMap`.
-4) **Yes**. The internal `couplingMap` function is built assuming WoS-style data, especially `SR` as the unique document identifier and `CR` as the list of cited references. Data from other sources that is missing or formatted differently will produce empty or broken networks.
-5) If `couplingMap` returns an empty or broken network, this file has no checks in place and will crash immediately. The temporary HTML file created to display the network is never deleted after use, which slowly wastes disk space.
-6) **Indirect**. This file does not access any column directly, but the ETL must ensure the full DataFrame is correctly standardized — particularly `SR`, `CR`, `AU`, `TC`, `PY`, `DE`, and `ID` — because `couplingMap` depends on them internally depending on the type of analysis the user selects.
+4) **Yes**. `couplingMap` is built for WoS-style data, especially `SR` and `CR`.
+5) No validation on the network returned by `couplingMap` — a broken network causes a hard crash. Temporary HTML file is never deleted.
+6) **Indirect**. The ETL must ensure `SR`, `CR`, `AU`, `TC`, `PY`, `DE`, `ID` are correctly formatted for `couplingMap` to work.
 
 ### get_co_occurence_network.py
-1) Builds a network showing which words or keywords appear together most often across papers. Each bubble is a word, and the lines between bubbles show how frequently those words co-occur. The user can choose to analyze author keywords, index keywords, title words, abstract words, or subject categories. Besides the network, it also produces a density heatmap, a statistics table, and a degree distribution plot.
-2) **www.services** (provides `pd`, `go`, `np`, `os`, `tempfile`, `plt`); **biblionetwork**, **network_plot**, **term_extraction**, **cocMatrix**, **avoid_net_overlaps**, **field_by_year**.
-3) **None directly** — all column access is delegated to internal functions. **PY** is the only column accessed directly, inside `field_by_year`.
-4) **Yes**. The field names `ID`, `DE`, `TI`, `AB`, `WC` are all WoS column tags. Data from other sources using different names will produce an empty network with no error.
-5) If none of the field conditions match, the function silently returns nothing with no error message. Cluster colors are randomly generated on every run, so the same data looks different each time. The temporary HTML file is never deleted after use.
-6) **Indirect**. The ETL must ensure `ID`, `DE`, `TI`, `AB`, `WC`, and `PY` are all present and correctly formatted, as they are consumed by the internal functions this file delegates to.
+1) Builds a word or keyword co-occurrence network, plus a density heatmap, a statistics table, and a degree distribution plot.
+2) **www.services**; **biblionetwork**, **network_plot**, **term_extraction**, **cocMatrix**, **avoid_net_overlaps**, **field_by_year**.
+3) **None directly** — all column access delegated to internal functions. **PY** is accessed directly inside `field_by_year`.
+4) **Yes**. Field names `ID`, `DE`, `TI`, `AB`, `WC` are WoS tags — non-WoS sources will produce an empty network.
+5) If no field condition matches, the function silently returns nothing. Cluster colors are random on every run. Temporary HTML file is never deleted.
+6) **Indirect**. The ETL must ensure `ID`, `DE`, `TI`, `AB`, `WC`, and `PY` are all present and correctly formatted.
 
 ### get_cocitation.py
 ...
