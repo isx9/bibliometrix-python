@@ -303,28 +303,69 @@ It is used to verify that our ETL pipeline produces all required columns and to 
 6) **Indirect**. The ETL must ensure `CR` is present as a properly split list of reference strings, and `CR_AU`/`CR_SO` can be derived from it if needed.
 
 ### get_collaborationnetwork.py
-
+1) Generates a collaboration network between authors, universities, or countries from a bibliographic DataFrame. It builds a graph via biblionetwork(), then produces four outputs: an interactive PyVis HTML network, a density heatmap, a cluster statistics table, and a normalized degree plot.
+2) **www.services**
+3) **AU**, then AU_UN, AU_CO.
+4) **Yes**. There are two: metaTagExtraction() is called to derive AU_UN and AU_CO, this function is known to have hardcoded WoS parsing logic (affiliation string formats, country extraction patterns), so if affiliations from Scopus/PubMed are formatted differently it will silently produce empty or wrong values; biblionetwork() likely expects AU, AU_UN, AU_CO in WoS delimiter/format (semicolon-separated strings or lists).
+5) **Yes**, metaTagExtraction() has hardcoded WoS affiliation parsing, so AU_UN and AU_CO will silently produce empty or wrong values for non-WoS sources.
+6) **Indirectly**. The function itself is downstream of the ETL, but the pipeline must guarantee that AU is a proper list[str] and C1 is a list[str] with standardized affiliation strings so metaTagExtraction() can correctly extract AU_UN and AU_CO.
 
 ### get_correspondingauthorcountries.py
-...
+1) Extracts the corresponding author's country (AU1_CO) and all author countries (AU_CO) via metaTagExtraction(), then counts articles, single-country publications (SCP), and multi-country publications (MCP) per country. Returns a horizontal bar chart and a summary table.
+2) **www.services**
+3) AU1_CO (derived), AU_CO (derived), AU, C1, RP (implicitly required by metaTagExtraction()).
+4) **Yes**. Both metaTagExtraction(Field="AU_CO") and metaTagExtraction(Field="AU1_CO") rely on WoS-style affiliation parsing of C1 and RP, as flagged in metatagextraction.py. Non-WoS sources will silently produce empty or wrong country values.
+5) Issues: data.dropna(subset=["AU1_CO", "AU_CO"]) silently drops all rows if metaTagExtraction() fails to parse affiliations from non-WoS sources, producing an empty DataFrame with no error; no validation that C1 or RP exist before calling metaTagExtraction(), mirroring the crash pattern flagged in metatagextraction.py; top_k_countries is applied after sorting but the earlier top_country_names already takes all countries — the filtering step is redundant and misleading.
+6) **Yes**. C1 and RP must be present and correctly formatted as list[str] with standardized affiliation strings so metaTagExtraction() can correctly derive AU_CO and AU1_CO. Without this, the function silently returns an empty result.
 
 ### get_countriesproduction.py
-...
+1) Extracts author countries via metaTagExtraction(), counts publication frequency per country, downloads world boundary geodata, and produces an interactive choropleth map and a summary table of scientific production by country.
+2) **www.services**
+3) AU_CO (derived), C1 (implicitly required by metaTagExtraction()).
+4) **Yes**. metaTagExtraction(Field="AU_CO") relies on WoS-style affiliation parsing of C1, as flagged in metatagextraction.py.
+5) No validation that C1 exists before calling metaTagExtraction(), mirroring the crash pattern flagged in metatagextraction.py. Country name normalization only corrects "USA" → "UNITED STATES OF AMERICA"; all other country name mismatches between the source data and the shapefile silently result in unmatched rows and zero counts. dropna is never called on AU_CO after explode(), so empty list entries produce NaN rows that pollute the country counts.
+6) **Yes**. C1 must be present and correctly formatted as list[str] with standardized affiliation strings so metaTagExtraction() can correctly derive AU_CO. Country name formatting in C1 should also conform to WoS conventions to maximize matches against the shapefile.
 
 ### get_countriesproductionovertime.py
-...
+1) Extracts author countries via metaTagExtraction(), pairs each country with its publication year, computes cumulative article counts over time, and returns a line chart of the top-k countries' production over time plus the underlying DataFrame.
+2) **www.services**.
+3) AU_CO (derived), PY, C1 (implicitly required by metaTagExtraction())
+4) **Yes**. metaTagExtraction(Field="AU_CO") relies on WoS-style affiliation parsing of C1, as flagged in metatagextraction.py. Non-WoS sources will silently produce empty or wrong country values.
+5) Issues: no validation that C1 or PY exist before use, mirroring the crash pattern flagged in metatagextraction.py and thematicmap.py; years = data["PY"].repeat(nAFF).values[:len(affiliations)] silently misaligns years with affiliations if any AU_CO entry was NaN and got dropped by dropna() — the repeat is based on the full DataFrame length but AFF has already dropped rows; PY is never cast to a numeric type before astype(int) — if PY contains empty strings (as our ETL schema allows), this will crash.
+6) **Yes**. C1 must be present and correctly formatted as list[str] so metaTagExtraction() can derive AU_CO. PY must be present, non-empty, and castable to integer for the year alignment logic to work correctly.
+
 
 ### get_data.py
-...
+1) Handles file upload from the Shiny dashboard UI. Depending on the selected mode, it processes one or more bibliographic files via biblio_json() or process_multiple_files(), loads the result into the reactive DataFrame df, and returns a status message to display in the UI.
+2) **www.services**.
+3) **No**.
+4) **Indirectly**. biblio_json() and process_multiple_files() are the functions that actually parse and standardize the data — if those have WoS-specific assumptions (as flagged in parsers.py), the DataFrame loaded here will reflect those issues.
+5) //
+6) **Yes**. This is the entry point where our ETL must be plugged in. The "1B" path in particular must be routed through the standardization pipeline rather than calling pd.read_excel() directly, to ensure all downstream functions receive a correctly typed and validated DataFrame.
 
 ### get_database.py
-...
+1) Maps the user's UI selection to a human-readable database name string. Reads two Shiny input controls, input.select() (which tab is active) and input.database() (which source was chosen), and returns a plain string like "Web of Science" or "Scopus".
+2) **www.services**.
+3) **No**.
+4) **None directly**. However this function is the gatekeeper that sets the DB value downstream. The string it returns must match whatever the ETL pipeline uses as the DB column value.
+5) Two: DB value mismatch, the exam spec requires DB to hold standardised identifiers like "WEB_OF_SCIENCE" or "SCOPUS" while this function returns display strings ("Web of Science", "Scopus"), which are not the same - if DB is populated from this output, the contract is broken; UnboundLocalError risk, if input.select() returns anything outside "1A", "1B", "1C", the function reaches return database without ever assigning it, so it needs an else branch or a default.
+6) **Yes**. Either this function's return values must be updated to match the schema DB identifiers, or the ETL Transform phase must normalise the returned string into the correct DB value before writing to the DataFrame.
 
 ### get_factorialanalysis.py
-...
+1) Builds a 2D interactive word map for conceptual structure analysis. It takes a DataFrame and a field (ID, DE, TI, AB), constructs a document-term matrix, runs a dimensionality reduction method (MCA, CA, or MDS), clusters the resulting term coordinates with hierarchical clustering, and returns an annotated Plotly scatter figure plus coordinate/cluster DataFrames. Also contains helpers: _to_seq (flatten values to list), eig_correction (Benzecri eigenvalue correction), avoidOverlaps (label deduplication — currently commented out), and assign_consistent_colors.
+2) **www.services**.
+3) **ID, DE, TI, AB**.
+4) field="ID" default. ID (Keywords Plus) is a WoS-exclusive field — it does not exist in Scopus, PubMed, or Dimensions exports. Using ID as the default silently produces an empty or broken analysis on non-WoS data.
+5) //
+6) **Yes**. The ETL must ensure that: ID is a list[str] (WoS Keywords Plus) and dor non-WoS sources that lack ID, populate it as [] per the null contract — but also ensure the UI defaults field to DE (author keywords) for those sources, since an all-empty ID column will produce no usable analysis; DE, TI, AB are correctly typed (list[str] for DE, str for TI/AB).
 
 ### get_filters.py
-...
+1) Two functions. get_filters() enriches the DataFrame with computed filter metadata: min/max publication year, average citations per year, and Bradford's Law zone assignment per source journal. get_filtered_table() applies user-driven UI filters (year range, language, document type, avg citations, Bradford zone) to the enriched DataFrame, then passes the result to get_table() for display.
+2) **www.services**.
+3) **PY, TC, SO, LA, DT**.
+4) **Yes**. LA and DT value sets are implicitly WoS-formatted. The UI populates filter options from whatever values exist in these columns. WoS uses "English" and "Article"; Scopus may use "English" but "Journal Article" for DT. If not normalised by ETL, the filter checkboxes will show mixed values and users may filter out valid records unintentionally. || Bradford zone logic assumes SO is a clean, standardised journal name. WoS and Scopus capitalise journal names differently, so the same journal can appear as two separate sources, splitting its frequency and producing wrong zone assignments.
+5) Division by zero in Average_Citations_Per_Year. If PY == current_year, Years_Since_Publication = 1 — safe. But if PY > current_year (malformed data), the denominator goes negative. No guard exists. ETL should clamp PY to <= current_year. || TC nulls not handled. If TC contains NaN (not coerced to 0 by ETL), Average_Citations_Per_Year will be NaN, silently breaking the citations slider filter in get_filtered_table().
+6) **Yes**. The ETL must: Cast TC to int, nulls → 0 || Cast PY to int, no nulls, clamped to valid range || Normalise SO to a consistent casing (uppercase) across sources || Normalise DT to a controlled vocabulary (e.g. "Article", "Review") so UI filters work identically regardless of source || Normalise LA to a consistent format (e.g. "ENGLISH").
 
 ### get_frequentwords.py
 ...
