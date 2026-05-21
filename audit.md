@@ -277,7 +277,6 @@ It is used to verify that our ETL pipeline produces all required columns and to 
 5) Empty chart with no error if `SR` is missing. Crashes if `TC` or `PY` are non-numeric. Division by zero possible if `PY` equals current year.
 6) **Yes**. `SR` must be correctly built by the ETL, `TC` and `PY` must be numeric, `DI` should be present as a string.
 
----
 
 ### get_clusteringcoupling.py
 1) Groups papers or authors into clusters based on shared references or keywords and draws an interactive network. Saves the result as an HTML file.
@@ -296,10 +295,15 @@ It is used to verify that our ETL pipeline produces all required columns and to 
 6) **Indirect**. The ETL must ensure `ID`, `DE`, `TI`, `AB`, `WC`, and `PY` are all present and correctly formatted.
 
 ### get_cocitation.py
-...
+1) Builds a co-citation network — meaning it finds which references, authors, or sources are cited together most often across papers, and draws an interactive network where each bubble is a reference/author/source and lines show how often they are cited together. Also produces a density heatmap, a cluster statistics table, and a degree distribution plot.
+2) **www.services**; **biblionetwork**, **network_plot**, **metaTagExtraction**, **avoid_net_overlaps**.
+3) **None directly** — all column access is delegated to `biblionetwork` and `metaTagExtraction`. `CR`, `CR_AU`, and `CR_SO` are checked for existence but not read directly.
+4) **Yes**. `biblionetwork` and `metaTagExtraction` are built for WoS-style reference strings. Non-WoS sources with differently formatted references will produce empty or broken networks.
+5) If `biblionetwork` returns an empty network the function crashes with no clear error. Cluster colors are randomly generated on every run. Temporary HTML file is never deleted.
+6) **Indirect**. The ETL must ensure `CR` is present as a properly split list of reference strings, and `CR_AU`/`CR_SO` can be derived from it if needed.
 
 ### get_collaborationnetwork.py
-...
+
 
 ### get_correspondingauthorcountries.py
 ...
