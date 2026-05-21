@@ -206,26 +206,42 @@ It is used to verify that our ETL pipeline produces all required columns and to 
 6) relevant for ETL: yes/no
 
 ### get_affiliationproductionovertime.py
-1) Computes cumulative scientific publication counts per affiliation over time, selects the top-k affiliations by total output at the latest year, and returns an interactive Plotly line chart (cumulative articles vs. year per affiliation) plus the filtered summary DataFrame.
-2) **www.services** (wildcard — provides `pd`, `px`, `go`).
+1) Counts cumulative publications per institution over time, picks the top-k institutions, and draws a line chart showing how each institution's output grew year by year.
+2) **www.services** (provides `pd`, `px`, `go`).
 3) **AU_UN**, **PY**.
-4) **No** explicit DB check, but `AU_UN` is a WoS-derived column (university/affiliation field). Non-WoS sources do not natively produce `AU_UN` — it is typically parsed and normalized from `C1` by a WoS-specific service. Any source lacking this pre-processed column will crash immediately.
-5) `AU_UN` is expected to be a list of strings per row — if it arrives as a raw string (e.g. semicolon-delimited, as it would from a CSV), the `lambda x: [aff for aff in x if aff.strip() != ""]` will iterate over characters instead of affiliations, silently producing garbage. `PY` is never cast to `int` before `repeat()` and `astype(int)` — nulls in `PY` will propagate and cause a crash at the `astype(int)` call. No guard against `top_k_affiliations` exceeding the number of available affiliations.
-6) **Yes**. `AU_UN` must be present and correctly typed as `list[str]` per row, and `PY` must be non-null and castable to `int`. The ETL pipeline must either populate `AU_UN` directly or derive it from `C1` during the Transform phase.
-
+4) **No** explicit WoS-only logic, but `AU_UN` (institution name) is a column that only WoS produces natively. Other sources will not have it unless the ETL builds it from `C1`.
+5) `AU_UN` is expected to be a list of institution names per row — if it is a plain text string instead, the function will process it letter by letter and produce wrong results silently. `PY` is not checked for null values before use.
+6) **Yes**. `AU_UN` must be a list of strings per row, and `PY` must be non-null and a whole number. The ETL must build `AU_UN` from `C1` if the source is not WoS.
+   
 ### get_annualproduction.py
-1) Computes annual scientific publication counts from the `PY` column, fills in missing years with zero, and returns an interactive Plotly line chart (articles vs. year) plus the aggregated summary DataFrame.
-2) **www.services** (wildcard — provides `pd`, `px`, `go`).
+1) Counts how many scientific papers were published each year, fills in years with zero publications, and draws a line chart (year vs. number of articles).
+2) **www.services** (provides `pd`, `px`, `go`).
 3) **PY** only.
-4) **No** explicit DB check, but `PY` is the WoS tag for Publication Year. Any source using a different column name will cause an immediate `KeyError`.
-5) `PY` is never cast to `int` before `range(min_year, max_year + 1)` if it arrives as a string or contains nulls it crashes with `TypeError`. `df.get()` assumes a custom wrapper object, not a plain DataFrame. Wildcard import hides actual dependencies. No guard against an empty or all-null `PY` column.
-6) **Yes**. `PY` must be present, non-null, and cast to `int` by the ETL pipeline before this function is called. No patching of the function itself should be needed once that contract is met.
+4) **No** explicit WoS-only logic, but the column name `PY` (Publication Year) comes from WoS. Sources using a different name will break the function.
+5) `PY` is never converted to a number before use — if it contains text or empty values the function will crash. No protection against an empty dataset.
+6) **Yes**. `PY` must be present, non-null, and a whole number (int).
 
 ### get_authorlocalimpact.py
-...
+1) Calculates impact scores (h-index, g-index, m-index, total citations, number of papers) for each author, ranks them by the chosen metric, and draws a bubble chart of the top authors.
+2) **www.services** (provides `pd`, `px`, `go`, `np`).
+3) **AU**, **TC**, **PY**.
+4) **No** explicit WoS-only logic, but `AU` is expected in WoS author format.
+5) `AU` is never checked before splitting — if it is a plain text string instead of a list, the function will produce wrong results silently. The internal index calculation functions (`h_calc`, `g_calc`) are applied incorrectly, which may produce wrong scores. The docstring contains wrong parameter names, suggesting copy-paste errors.
+6) **Yes**. `AU` must be a list of strings, `TC` must be a whole number, and `PY` must be non-null and numeric.
 
 ### get_authorproductionovertime.py
-...
+1) Counts publications and citations per author per year, picks the top-k authors, and draws a scatter plot (author vs. year, dot size = number of publications). Also returns two summary tables: one by author/year and one with full document details.
+2) **www.services** (provides `pd`, `px`, `go`).
+3) **AU**, **PY**, **TC** (core — function breaks without these); **TI**, **SO**, **DI** (secondary — only used for the document table, missing ones are handled with a warning).
+4) **No** explicit WoS-only logic, but the fallback author splitting uses a comma, which is WoS-specific. Scopus uses semicolons, so author names would be wrong for other sources.
+5) The comma-based author splitting silently produces wrong names for non-WoS sources. If `DI` is named differently (e.g. `DOI`), the document table will be empty with only a printed warning instead of a clear error.
+6) **Yes**. `AU` must be a list of strings, `PY` and `TC` must be numeric, and `TI`, `SO`, `DI` must be present as text strings.
+### get_authorlocalimpact.py
+
+
+
+### get_authorproductionovertime.py
+
 
 ### get_averagecitations.py
 ...
