@@ -198,16 +198,28 @@ It is used to verify that our ETL pipeline produces all required columns and to 
 ---
 
 ## functions/
-- what it does
-- breaks on non-WoS data: yes/no
-- why it breaks (e.g. hardcoded column name "WoS")
-- needs patching: yes/no
+1) what it does
+2) dependencies
+3) columns used
+4) WoS-specific logic
+5) issues found 
+6) relevant for ETL: yes/no
+
+### get_affiliationproductionovertime.py
+1) Computes cumulative scientific publication counts per affiliation over time, selects the top-k affiliations by total output at the latest year, and returns an interactive Plotly line chart (cumulative articles vs. year per affiliation) plus the filtered summary DataFrame.
+2) **www.services** (wildcard — provides `pd`, `px`, `go`).
+3) **AU_UN**, **PY**.
+4) **No** explicit DB check, but `AU_UN` is a WoS-derived column (university/affiliation field). Non-WoS sources do not natively produce `AU_UN` — it is typically parsed and normalized from `C1` by a WoS-specific service. Any source lacking this pre-processed column will crash immediately.
+5) `AU_UN` is expected to be a list of strings per row — if it arrives as a raw string (e.g. semicolon-delimited, as it would from a CSV), the `lambda x: [aff for aff in x if aff.strip() != ""]` will iterate over characters instead of affiliations, silently producing garbage. `PY` is never cast to `int` before `repeat()` and `astype(int)` — nulls in `PY` will propagate and cause a crash at the `astype(int)` call. No guard against `top_k_affiliations` exceeding the number of available affiliations.
+6) **Yes**. `AU_UN` must be present and correctly typed as `list[str]` per row, and `PY` must be non-null and castable to `int`. The ETL pipeline must either populate `AU_UN` directly or derive it from `C1` during the Transform phase.
 
 ### get_annualproduction.py
-...
-
-### get_annualproduction.py
-...
+1) Computes annual scientific publication counts from the `PY` column, fills in missing years with zero, and returns an interactive Plotly line chart (articles vs. year) plus the aggregated summary DataFrame.
+2) **www.services** (wildcard — provides `pd`, `px`, `go`).
+3) **PY** only.
+4) **No** explicit DB check, but `PY` is the WoS tag for Publication Year. Any source using a different column name will cause an immediate `KeyError`.
+5) `PY` is never cast to `int` before `range(min_year, max_year + 1)` if it arrives as a string or contains nulls it crashes with `TypeError`. `df.get()` assumes a custom wrapper object, not a plain DataFrame. Wildcard import hides actual dependencies. No guard against an empty or all-null `PY` column.
+6) **Yes**. `PY` must be present, non-null, and cast to `int` by the ETL pipeline before this function is called. No patching of the function itself should be needed once that contract is met.
 
 ### get_authorlocalimpact.py
 ...
