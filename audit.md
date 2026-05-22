@@ -385,7 +385,12 @@ It is used to verify that our ETL pipeline produces all required columns and to 
 
 
 ### get_localcitedauthors.py
-...
+1) Finds which authors are most cited within the dataset itself (not globally), ranks them by local citation count, and draws a dot chart of the top-k authors.
+2) **www.services**; **metaTagExtraction**, **histNetwork**.
+3) **AU**, **TC** (core); **SR** (must already exist or be built by `metaTagExtraction` before use).
+4) **No** explicit DB checks, but `metaTagExtraction` and `histNetwork` are built for WoS-style data.
+5) `AU` is exploded without checking if it is a proper list — plain strings will produce wrong results. If `histNetwork` returns an empty result the function crashes immediately. `SR` is rebuilt here by `metaTagExtraction`, which should instead already be present from the ETL.
+6) **Yes**. `AU` must be a `list[str]`, `TC` must be non-null and numeric, and `SR` must be correctly built by the ETL pipeline.
 
 ### get_localciteddocuments.py
 ...
