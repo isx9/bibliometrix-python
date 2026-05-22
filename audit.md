@@ -378,7 +378,7 @@ It is used to verify that our ETL pipeline produces all required columns and to 
 ### get_historiograph.py
 1) Builds an interactive historiographic network map showing citation relationships between key papers over time. It calls metaTagExtraction() and histNetwork() from services to construct the citation graph, then histPlot() for the initial layout. It then rebuilds the graph with networkx, optionally removes isolated nodes, positions nodes on a timeline (x = year, y = cluster), computes node sizes from local citation scores (LCS), and renders an interactive pyvis HTML network saved to a temp file. Returns the plot object, a metadata DataFrame, and the temp HTML filename.
 2) **www.services**.
-3) **SR, CR, DOI, AU, TI, DE, ID, PY**.
+3) **SR, CR, DOI, TI, DE, ID, PY**.
 4) **Yes**. histNetwork() parses CR using WoS reference string format ("Author, Year, Journal, Vol, Page"). This is the most WoS-specific dependency in the entire codebase. Non-WoS CR strings will produce zero or wrong citation matches, resulting in an empty or disconnected graph. || metaTagExtraction(df, "SR") regenerates SR from WoS-style author/year/journal fields. If SR was not correctly populated by ETL, this call may produce malformed node identifiers that break edge matching. || node_label="ID" and node_label="DE" are swapped. The code maps "ID" → row.get("Author_Keywords") and "DE" → row.get("KeywordsPlus"), which is the reverse of the standard schema (DE = author keywords, ID = Keywords Plus). This is a WoS internal naming artefact from histNetwork() output columns.
 5) DE/ID label mapping is inverted (as noted above). A user selecting node_label="DE" gets Keywords Plus, not author keywords. Needs a one-line swap or renaming in histNetwork() output. || eval() used again for DE/ID node labels (same pattern as get_frequentwords.py). Unsafe and redundant if ETL guarantees list[str].
 6) **Yes, high priority**. The ETL must: Populate SR correctly as "FirstAuthor, Year, Journal" — it is the primary node key for the entire graph. || Normalise CR entries to WoS reference string format, as histNetwork() depends on it for edge construction. This is the single highest-risk dependency in the project for non-WoS sources. || Ensure DOI is str, empty string "" if missing (not NaN). || Ensure DE and ID are list[str] to eliminate the eval() calls.
@@ -569,7 +569,7 @@ It is used to verify that our ETL pipeline produces all required columns and to 
 ### All columns required across the entire codebase
 | Column | Used by |
 |--------|---------|
-| AU | biblionetwork.py, get_relevantauthors.py, ... |
+| AU | biblionetwork.py, get_relevantauthors.py, get_affiliationproductionovertime.py, get_authorlocalimpact.py, get_authorproductionovertime.py, get_collaborationnetwork.py, get_correspondingauthorcountries.py, get_localcitedauthors.py, get_lotkalaw.py, get_maininformations.py, get_table.py|
 | TI | ... |
 
 ### Files that need patching
