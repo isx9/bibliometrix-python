@@ -425,28 +425,68 @@ It is used to verify that our ETL pipeline produces all required columns and to 
 6) **Yes**. `AU` must be present and correctly formatted as a `list[str]` per row.
 
 ### get_maininformations.py
-...
+1) Computes a comprehensive set of summary statistics for the dataset and adds them as new columns to the DataFrame. Metrics include: publication year range, unique sources, annual growth rate (CAGR), unique authors, single-authored documents, international co-authorship percentage, co-authors per document, unique author keywords, references per document, average document age, and average citations per document. Returns the enriched DataFrame. This is the main "overview" function used to populate the summary panel of the dashboard.
+2) **www.services**.
+3) **PY**, **SO**, **AU**, **TC**, **CR**, **DE** (core); **AU_CO** (derived — extracted by `metaTagExtraction()` if not already present).
+4) `metaTagExtraction(df, "AU_CO")` is called to extract country information from WoS-style affiliation strings if `AU_CO` is missing. Non-WoS sources with differently formatted affiliations will produce wrong or empty country counts, causing the international co-authorship metric to be zero or incorrect.
+5) `AU` is iterated as a list without a null guard — if any row contains a plain string instead of a list, the flattening `[author for sublist in AU_list for author in sublist]` will iterate over characters and produce wrong author counts silently. Same issue applies to `DE` and `CR`. CAGR calculation divides by `ny = max - min` which will be zero if all papers are from the same year, causing a `ZeroDivisionError`.
+6) **Yes, high priority.** Ensure `AU`, `DE`, and `CR` are all `list[str]` — this function iterates over them directly and will silently produce wrong results if they are plain strings. Ensure `PY` is non-null and numeric to avoid crashes in year-range and age calculations. Ensure `TC` is numeric with nulls replaced by `0`. Ensure `C1` or `RP` are correctly populated so that `metaTagExtraction()` can extract `AU_CO` if needed.
 
 ### get_referencesspectroscopy.py
-...
+1) Generates a Reference Publication Year Spectroscopy (RPYS) analysis — a technique that identifies which historical years had the most influence on a research field by counting how often papers from each year are cited in the dataset's reference lists. It extracts publication years from each cited reference string, counts citations per year, computes a 5-year moving median deviation to highlight anomalous peaks, and returns an interactive dual-line chart, a year-level summary table, and a reference-level table with Google Scholar links.
+2) **www.services**.
+3) **CR** only.
+4) Year extraction from reference strings uses the regex `r'\b\d{4},'` which matches a 4-digit year followed by a comma — this is the WoS reference string format ("Author, Year, Journal, Vol, Page"). Non-WoS reference formats that place the year differently (e.g. PubMed, Scopus) will produce zero year matches, resulting in an empty chart.
+5) `df['CR'].apply(lambda x: [i for i in x])` assumes `CR` is already a list — if it arrives as a plain string it will iterate over characters and produce garbage silently. If `CR` is entirely empty or null the `year_seq.min()` call will crash. The year regex silently assigns `0` to references where no year is found, which then pollutes the year distribution if not filtered out.
+6) **Yes, high priority.** Ensure `CR` is a `list[str]` where each element is a properly formatted reference string. The year regex `r'\b\d{4},'` requires the year to be followed by a comma — ETL must ensure CR entries follow the WoS format "Author, Year, Journal, Vol, Page" for year extraction to work correctly across all sources. References with no detectable year should be filtered out rather than assigned year `0`.
 
 ### get_relevantaﬃliations.py
-...
+1) Ranks institutions by number of publications and draws a dot chart of the top-k affiliations. Depending on the `disambiguation` parameter, it either uses `AU_UN` (a cleaned and disambiguated university name field) or the raw `C1` affiliation strings. Returns the chart and a summary table.
+2) **www.services**.
+3) **AU_UN** or **C1** depending on the `disambiguation` parameter — only one is used per call.
+4) `AU_UN` is a WoS-derived column that contains disambiguated university names — it does not exist natively in non-WoS sources and must be built by the ETL from `C1`. If `disambiguation == "no"`, `C1` is used directly, which is more portable across sources.
+5) Crashes immediately if `AU_UN` is missing when `disambiguation == "yes"`, or if `C1` is missing when `disambiguation == "no"` — no guard exists for either case. Both columns are expected to be `list[str]` per row — plain strings will produce wrong results after `explode()`. The docstring mentions `num_of_authors` and `frequency` as parameter names but the actual parameters are `num_of_affiliations` and `disambiguation`, indicating copy-paste drift.
+6) **Yes.** Ensure `C1` is present as a `list[str]` of affiliation strings — it is the primary input when `disambiguation == "no"` and the source for building `AU_UN` when `disambiguation == "yes"`. Ensure `AU_UN` is derived from `C1` during the ETL Transform phase and stored as a `list[str]` of cleaned university names.
 
 ### get_relevantauthors.py
-...
+1) Ranks authors by number of publications, percentage of documents, or fractionalized count (where each author of a multi-authored paper gets a fractional credit), and draws a dot chart of the top-k authors. Returns the chart and a full ranking table.
+2) **www.services**.
+3) **AU** only.
+4) **No** explicit DB checks, but `AU` is expected in WoS author format. The fallback `lambda x: x if isinstance(x, list) else []` silently replaces non-list values with an empty list instead of trying to parse them, which means authors from non-WoS sources arriving as delimited strings will be completely ignored.
+5) Non-list `AU` values are silently dropped rather than parsed, so non-WoS sources that store authors as semicolon-delimited strings will produce an empty chart with no error. The `frequency` parameter values in the docstring (`"N. of Documents"`, `"Percentage"`, `"Fractionalized"`) do not match the actual values checked in the code (`"percentage"`, `"freq_measure"`), meaning the default `"N. of Documents"` always falls through to the raw count branch regardless of user selection.
+6) **Yes.** Ensure `AU` is present and correctly formatted as a `list[str]` per row — non-list values are silently ignored, producing wrong author counts. Ensure author names follow a consistent format (e.g. `"Surname, Firstname"`) across all sources to avoid duplicate entries for the same author.
 
 ### get_relevantsources.py
-...
+1) Ranks journals or sources by number of publications and draws a dot chart of the top-k sources. Returns the chart and a full ranking table.
+2) **www.services**.
+3) **SO** only.
+4) **No** explicit DB checks, but `SO` is the WoS tag for journal/source name. Sources using a different column name will crash immediately.
+5) Crashes if `SO` is missing entirely. No check is performed on whether `SO` values are plain strings — if they arrive as lists the `value_counts()` will produce wrong results. No guard against an empty dataset after `dropna()`.
+6) **Yes.** Ensure `SO` is present, non-null, and a plain string representing the journal or source name. Standardize casing consistently across sources (e.g. always uppercase) to avoid the same journal appearing multiple times under different capitalizations.
 
 ### get_sourceslocalimpact.py
-...
+1) Calculates impact scores (h-index, g-index, m-index, total citations, number of papers) for each journal or source, ranks them by the chosen metric, and draws a horizontal bar chart of the top-k sources. Returns the chart and the full ranking table.
+2) **www.services**.
+3) **SO**, **TC**, **PY**.
+4) **No** explicit DB checks, but `SO`, `TC`, and `PY` are all WoS column tags. Sources using different names will crash immediately.
+5) `h_calc` and `g_calc` are applied via `transform` instead of `agg`, which calls them once per row rather than once per group — this produces incorrect index values silently. `TC` and `PY` are cast with `errors='coerce'` and rows with nulls are dropped, but no warning is raised if a large fraction of rows is lost. Division by zero is possible in `m_index` if `today == PY_start - 1`, though extremely unlikely.
+6) **Yes.** Ensure `SO` is present as a non-null string, `TC` is numeric with nulls replaced by `0`, and `PY` is a valid 4-digit year. The `h_calc` and `g_calc` functions need to be fixed to use `agg` instead of `transform` to produce correct index values — this is a bug in the function itself that the ETL cannot work around.
 
 ### get_sourcesproduction.py
-...
+1) Computes annual or cumulative publication counts per journal over time, selects the top-k sources by total output, and draws a multi-line chart showing each source's production trajectory. Returns the chart and the year-by-source matrix.
+2) **www.services**.
+3) **SO**, **PY** — both accessed directly and also passed to `cocMatrix()` internally.
+4) **No** explicit DB checks, but `SO` and `PY` are WoS column tags. `cocMatrix()` is also built assuming WoS-style input.
+5) `PY` is cast to `str` before `cocMatrix()` and back to `int` after — if `PY` contains nulls or non-numeric values this double cast will crash. If all papers belong to a single source `WSO.shape[1] == 1` is handled, but if `SO` is entirely missing `cocMatrix()` will crash with no clear error. No guard against `num_of_sources_production` being zero.
+6) **Yes.** Ensure `SO` is present as a non-null string and `PY` is a valid 4-digit integer — both are cast and used in matrix operations that will crash silently or produce wrong results if the types are incorrect.
 
 ### get_status.py
-...
+1) Two small utility functions: `get_status()` converts a list of missing-value percentages into human-readable status labels (Excellent, Good, Acceptable, Poor, Critical, Completely missing), and `get_status_color()` maps each status label to a CSS background color for dashboard display. Used to give a quick visual quality assessment of the dataset columns.
+2) **www.services**.
+3) **None** — this file does not access any DataFrame column. It only processes a list of percentages passed in as a parameter.
+4) **No**.
+5) No input validation on `missing_percentage` — if a non-numeric value is passed, the comparisons will fail silently and return `"Unknown"`. The two functions are tightly coupled by string labels but there is no shared constant, so a typo in one function would break the other silently.
+6) **No direct ETL relevance.** This is a pure utility file for dashboard display. The ETL pipeline does not need to produce any specific column for this function to work.
 
 ### get_table.py
 ...
