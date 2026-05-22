@@ -489,22 +489,52 @@ It is used to verify that our ETL pipeline produces all required columns and to 
 6) **No direct ETL relevance.** This is a pure utility file for dashboard display. The ETL pipeline does not need to produce any specific column for this function to work.
 
 ### get_table.py
-...
+1) Generates a metadata completeness report for the loaded dataset. It counts missing values, empty strings, and empty lists for every column, calculates the percentage of missing data per column, assigns a quality status (Excellent, Good, Acceptable, Poor, Critical, Completely missing), and displays the results as both a Plotly table and an interactive HTML data table with export buttons. This is the main data quality dashboard panel — it gives users an immediate overview of which columns are well populated and which need attention.
+2) **www.services**; **get_status** (imported explicitly for status label and color functions).
+3) **All columns present in the DataFrame** — it iterates over every column to compute missing value counts. The `column_descriptions` dictionary defines a fixed set of expected columns: `AB, AU, AU_UN, DB, DE, DT, LA, PU, PY, RP, SC, SO, SR, TC, TI, UT, C1, CR, OI, AU1_UN, EM, DI, BP, EP, SN, VL, ID, FU, FX, JI, OA, IS, PMID`.
+4) **No** explicit DB checks, but the `column_descriptions` dictionary is entirely based on WoS field tags. Non-WoS columns not in this dictionary will still appear in the table but with no human-readable description.
+5) The status color mapping in `create_plotly_table` uses `"Fair"` and `"Poor"` as keys, but `get_status()` never produces `"Fair"` — it produces `"Acceptable"` instead. This means the color for `"Acceptable"` rows will always fall through to `"white"`, losing the intended visual warning. Missing values are counted as NaN, empty string, single space, or empty list — but not `None`, which may slip through undetected.
+6) **Yes.** The ETL must ensure all mandatory columns defined in the schema are present in the DataFrame — even if empty — so this function can report their completeness status correctly. Columns populated with `None` instead of `""` or `[]` will be undercounted in the missing value report, giving a false "Excellent" status.
 
 ### get_thematicevolution.py
-...
+1) Tracks how research themes evolve over time by splitting the dataset into user-defined time periods, running a full thematic map analysis on each period, and then computing inclusion, weighted inclusion, and stability indices to measure how strongly themes from one period carry over into the next. The results are visualised as an interactive network where nodes are research clusters and directed edges show thematic continuity between periods. Also returns a summary table of cluster transitions and the raw thematic map results per period. One of the most complex files in the codebase — it internally calls `thematic_map()`, `timeslice()`, and `plot_thematic_evolution()`.
+2) **www.services**
+3) **None directly** — all column access is delegated to `thematic_map()` and `timeslice()`. `PY` is the only column accessed directly inside `timeslice()`.
+4) **Yes**. The field names `ID`, `DE`, `TI`, `AB` are WoS column tags passed to `thematic_map()` internally. Non-WoS sources using different names will produce empty results. `thematic_map()` also assumes WoS-style keyword formatting for `ID` and `DE`.
+5) If `years` is not provided the function raises a `ValueError` immediately — no default is computed. If any time period produces zero clusters, the function prints a message and returns early with no chart and no clear error to the user. The `thematic_map()` return value is assumed to be a tuple but is also checked for being a dict — this inconsistency suggests the internal API is unstable and may break silently depending on the version. Temporary HTML file is never deleted.
+6) **Yes, high priority.** Ensure `PY` is non-null and numeric — it is the only column used directly by `timeslice()` to split the data into periods, and wrong values will produce empty or misaligned time slices. Ensure `ID` and `DE` are `list[str]` — they are the primary inputs to `thematic_map()` for keyword network construction. For non-WoS sources that lack `ID`, populate it as `[]` per the null contract, but ensure the UI defaults the field to `DE` for those sources since an all-empty `ID` column will produce no usable analysis.
 
 ### get_thematicmap.py
-...
+1) A thin wrapper around the internal `thematic_map()` function. It passes all parameters directly to `thematic_map()`, which builds a keyword co-occurrence network, detects research clusters, and positions them on a centrality vs. density bubble chart. Returns the map figure, the HTML network file path, and three DataFrames: term-level data, cluster-level data, and document-to-cluster assignments.
+2) **www.services**.
+3) **None directly** — all column access is delegated entirely to `thematic_map()`.
+4) **Yes**. The field names `ID`, `DE`, `TI`, `AB` are WoS column tags passed through to `thematic_map()`. Non-WoS sources using different names will produce empty results.
+5) This file has no error handling of its own — if `thematic_map()` crashes or returns unexpected output, the exception propagates directly to the caller with no useful context. The return value assumes `thematic_map()` always returns exactly 5 values — if the internal API changes this will break silently.
+6) **Yes.** Ensure `ID` and `DE` are `list[str]` — they are the primary inputs to `thematic_map()`. For non-WoS sources that lack `ID`, populate it as `[]` and ensure the UI defaults the field to `DE`, since an all-empty `ID` column will produce no usable analysis. Ensure `TI` and `AB` are non-null strings if those fields are selected.
 
 ### get_threefieldplot.py
-...
+1) Generates a Sankey diagram showing relationships between three user-selected bibliographic fields (e.g. authors → keywords → journals). For each field it builds a document-attribute matrix, computes co-occurrence counts between adjacent fields, and draws the flows as proportional bands connecting the three columns. Optionally derives extra columns like `CR_SO`, `AU_CO`, `AB_TM`, `TI_TM` via internal functions before building the matrices.
+2) **www.services**; **textwrap**.
+3) **None directly** — all column access is delegated to `cocMatrix()`, `metaTagExtraction()`, and `term_extraction()`. The actual columns consumed depend entirely on which fields the user selects.
+4) **Yes**. All field names (`AU`, `DE`, `ID`, `SO`, `CR`, `TI`, `AB`, `WC`, `AU_CO`, `CR_SO`) are WoS column tags passed to `cocMatrix()`. Non-WoS sources using different names will produce empty matrices and a blank Sankey diagram with no error.
+5) If any of the three `cocMatrix()` calls returns an empty matrix, the dot product for edge computation will silently produce an empty edge list and the diagram will render blank with no explanation. If `metaTagExtraction()` fails to extract `CR_SO` or `AU_CO`, those fields will be missing and `cocMatrix()` will crash immediately.
+6) **Yes.** Ensure all potential field columns (`AU`, `DE`, `ID`, `SO`, `CR`, `TI`, `AB`, `C1`, `WC`) are present and correctly typed — `list[str]` for multi-value fields and `str` for scalar fields. Ensure `C1` is populated correctly so that `metaTagExtraction()` can derive `AU_CO` and `CR_SO` when those fields are selected.
 
 ### get_treemap.py
-...
+1) Counts the most frequent words or keywords in a selected field, and displays them as an interactive treemap where each rectangle's size represents the word's frequency. For title (`TI`) and abstract (`AB`) fields it first runs text mining to extract meaningful terms before counting. Also returns a full frequency table. Contains an internal helper function `table_tag()` that handles the actual word extraction and counting.
+2) **www.services**.
+3) **SR** (used inside `table_tag()` for deduplication); **DE**, **ID**, **TI**, **AB** (whichever is passed as `word_type`).
+4) **No** explicit DB checks, but field names `DE`, `ID`, `TI`, `AB` are all WoS tags. Non-WoS sources using different names will produce empty results.
+5) `SR` must be present for deduplication — if missing, `drop_duplicates(subset='SR')` crashes immediately. For `DE` and `ID`, `eval()` is called on string values — this is unsafe if the column contains arbitrary text instead of a properly formatted list string, and redundant if the ETL already guarantees `list[str]`. If `word_type` is not one of the handled cases, `text_data` will be an unprocessed column and the word extraction will silently produce wrong results.
+6) **Yes.** Ensure `SR` is present and non-null. Ensure `DE` and `ID` are `list[str]` to eliminate the unsafe `eval()` call. Ensure `TI` and `AB` are non-null strings if those fields are selected.
 
 ### get_trendtopics.py
-...
+1) Identifies which words or keywords were most prominent in each time period by computing the median publication year for each term and plotting them as a bubble chart (term vs. year, bubble size = frequency). For title and abstract fields it first runs text mining before counting. Also returns the full trend data table. Contains an internal helper `field_by_year()` that builds the co-occurrence matrix and computes year quantiles per term.
+2) **www.services**.
+3) **PY** (accessed directly inside `field_by_year()`); **DE**, **ID**, **TI**, **AB**, or any derived field like `TI_TM`, `AB_TM` depending on `field_tt`.
+4) **No** explicit DB checks, but field names are all WoS tags. Non-WoS sources using different names will produce empty results.
+5) `PY` is used directly in `np.repeat(df['PY'], x)` without null checks — missing or non-numeric values will cause a crash. If the selected field is empty or missing, `cocMatrix()` will return an empty matrix and `np.quantile()` will crash on an empty array. If `term_extraction()` fails, the derived `TI_TM` or `AB_TM` column will be missing and the function crashes immediately.
+6) **Yes.** Ensure `PY` is non-null and numeric — it is used directly in quantile calculations per term. Ensure `DE`, `ID`, `TI`, `AB` are correctly typed (`list[str]` for `DE`/`ID`, `str` for `TI`/`AB`) depending on the selected field.
 
 ### get_wordcloud.py
 1) Generates an interactive word cloud rendered as a pyvis HTML network where each word is a text-only node, sized and coloured by frequency. It calls table_tag() (defined locally, identical to the one in get_frequentwords.py) to count terms, places nodes at random polar coordinates within a compact radius, applies ForceAtlas2 physics for slight jitter, saves the result to a temp HTML file, and returns the filename plus a full frequency table.
