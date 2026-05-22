@@ -296,7 +296,7 @@ It is used to verify that our ETL pipeline produces all required columns and to 
 
 ### get_cocitation.py
 1) Builds a co-citation network — meaning it finds which references, authors, or sources are cited together most often across papers, and draws an interactive network where each bubble is a reference/author/source and lines show how often they are cited together. Also produces a density heatmap, a cluster statistics table, and a degree distribution plot.
-2) **www.services**; **biblionetwork**, **network_plot**, **metaTagExtraction**, **avoid_net_overlaps**.
+2) **www.services**.
 3) **None directly** — all column access is delegated to `biblionetwork` and `metaTagExtraction`. `CR`, `CR_AU`, and `CR_SO` are checked for existence but not read directly.
 4) **Yes**. `biblionetwork` and `metaTagExtraction` are built for WoS-style reference strings. Non-WoS sources with differently formatted references will produce empty or broken networks.
 5) If `biblionetwork` returns an empty network the function crashes with no clear error. Cluster colors are randomly generated on every run. Temporary HTML file is never deleted.
@@ -386,23 +386,43 @@ It is used to verify that our ETL pipeline produces all required columns and to 
 
 ### get_localcitedauthors.py
 1) Finds which authors are most cited within the dataset itself (not globally), ranks them by local citation count, and draws a dot chart of the top-k authors.
-2) **www.services**; **metaTagExtraction**, **histNetwork**.
+2) **www.services**.
 3) **AU**, **TC** (core); **SR** (must already exist or be built by `metaTagExtraction` before use).
 4) **No** explicit DB checks, but `metaTagExtraction` and `histNetwork` are built for WoS-style data.
 5) `AU` is exploded without checking if it is a proper list — plain strings will produce wrong results. If `histNetwork` returns an empty result the function crashes immediately. `SR` is rebuilt here by `metaTagExtraction`, which should instead already be present from the ETL.
 6) **Yes**. `AU` must be a `list[str]`, `TC` must be non-null and numeric, and `SR` must be correctly built by the ETL pipeline.
 
 ### get_localciteddocuments.py
-...
+1) Finds which papers in the dataset are most cited by other papers in the same dataset (local citations), ranks them, and draws a dot chart of the top-k documents. Also returns a table with local citations, global citations, and normalized metrics per document.
+2) **www.services**.
+3) **SR**, **TC**, **DI**, **PY** (core).
+4) **No** explicit DB checks, but `SR` is expected in WoS format and `histNetwork` is built for WoS-style data.
+5) `SR` is rebuilt here internally instead of being taken from the ETL pipeline. If `TC` contains nulls, `fillna(0)` handles it, but the LC/GC ratio calculation will produce division by zero for papers with zero global citations. If `histNetwork` returns an empty result the function crashes immediately.
+6) **Yes**. `SR` must be correctly built by the ETL, `TC` and `PY` must be non-null and numeric, and `DI` must be present as a string.
 
 ### get_localcitedreferences.py
-...
+1) Counts how many times each reference is cited across all papers in the dataset, ranks them, and draws a dot chart of the most cited references. Unlike global citation counts, this only looks at citations within the dataset itself.
+2) **www.services**.
+3) **CR** only.
+4) **No** explicit DB checks, but the fallback string splitting uses the user-provided separator, which means the function can handle non-WoS sources if `CR` is correctly formatted as a list or delimited string.
+5) Crashes if `CR` is missing entirely. If `CR` is an empty list or all nulls the chart will be empty with no clear error. The check `isinstance(data["CR"].iloc[0], list)` will crash if the DataFrame is empty.
+6) **Yes**. `CR` must be present and correctly formatted as a `list[str]` where each element is an individual reference string.
 
 ### get_localcitedsources.py
-...
+1) Counts how many times each journal or source is cited across all papers in the dataset, ranks them, and draws a dot chart of the most locally cited sources. The source names are extracted from the cited references using `metaTagExtraction`.
+2) **www.services**.
+3) **CR** (needed by `metaTagExtraction` to extract `CR_SO`); **CR_SO** (derived column, used directly for counting).
+4) **Yes**. `metaTagExtraction` parses source names from WoS-style reference strings. Non-WoS sources with differently formatted references will likely produce empty or wrong results.
+5) Crashes if `CR_SO` is missing or empty. The check `isinstance(data["CR_SO"].iloc[0], list)` will crash if the DataFrame is empty. If `metaTagExtraction` fails silently, the chart will be empty with no clear error.
+6) **Yes**. `CR` must be present as a properly formatted list of reference strings so that `metaTagExtraction` can correctly extract the source names into `CR_SO`.
 
 ### get_lotkalaw.py
-...
+1) Applies Lotka's Law to measure author productivity — it counts how many authors wrote exactly 1, 2, 3... papers, compares the observed distribution against the theoretical one, and draws a line chart showing both curves side by side.
+2) **www.services**.
+3) **AU** only.
+4) **No** explicit DB checks.
+5) Crashes if `AU` is missing or not a list — the list flattening `[author for sublist in data['AU'] for author in sublist]` will fail if any row is a plain string or null. If all authors wrote only one paper, `np.polyfit` may produce unreliable results with no warning.
+6) **Yes**. `AU` must be present and correctly formatted as a `list[str]` per row.
 
 ### get_maininformations.py
 ...
