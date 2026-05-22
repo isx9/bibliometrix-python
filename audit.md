@@ -570,7 +570,7 @@ It is used to verify that our ETL pipeline produces all required columns and to 
 | Column | Used by |
 |--------|---------|
 | AU | biblionetwork.py, get_relevantauthors.py, get_affiliationproductionovertime.py, get_authorlocalimpact.py, get_authorproductionovertime.py, get_collaborationnetwork.py, get_correspondingauthorcountries.py, get_localcitedauthors.py, get_lotkalaw.py, get_maininformations.py, get_table.py|
-| TI | ... |
+| TI | get_frequentwords.py, get_authorproductionovertime.py, get_factorialanalysis.py, get_historiograph.py, get_table.py, get_thematicevolution.py (not directly), get_thematicmap.py (not directly), get_threefieldplot.py (not directly), get_treemap.py, get_trendtopics.py, get_wordcloud.py, get_wordfrequency.py|
 
 ### Files that need patching
 | File | Line | Issue |
