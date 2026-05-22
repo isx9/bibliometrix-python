@@ -442,13 +442,28 @@ It is used to verify that our ETL pipeline produces all required columns and to 
 ...
 
 ### get_wordcloud.py
-...
+1) Generates an interactive word cloud rendered as a pyvis HTML network where each word is a text-only node, sized and coloured by frequency. It calls table_tag() (defined locally, identical to the one in get_frequentwords.py) to count terms, places nodes at random polar coordinates within a compact radius, applies ForceAtlas2 physics for slight jitter, saves the result to a temp HTML file, and returns the filename plus a full frequency table.
+2) **www.services**.
+3) **SR, and one of DE, ID, TI, AB**.
+4) ID is WoS-exclusive, same as in get_frequentwords.py and get_wordfrequency.py. || SR deduplication assumes SR is always populated, same as get_frequentwords.py. || eval() on DE/ID strings, same unsafe pattern as get_frequentwords.py.
+5) remove_terms silently not applied for TI/AB, inherited from table_tag() — same bug as in get_frequentwords.py.
+6) **Yes**.  Same requirements as get_frequentwords.py: SR must be populated for all rows. || DE and ID must be list[str] to eliminate eval(). || ID must be [] for non-WoS sources. || TI and AB must be str, not NaN/None. ||
 
 ### get_wordfrequency.py
-...
+1) Plots word/keyword frequency over time as a multi-line chart, one line per term. It calls term_extraction() for free-text fields (TI/AB) or reads keyword columns directly (DE/ID), then passes data to keyword_growth() which builds a year × term frequency DataFrame (cumulative or per-year). Two helpers are defined locally: trim_years() (fills a year range with observed frequencies and optionally cumulates) and keyword_growth() (parses terms, applies synonym merging and stopword removal, selects top-N terms, and assembles the final time series).
+2) **www.services**.
+3) **PY, and one of DE, ID, TI, AB depending on field_wf**
+4) ID is WoS-exclusive (Keywords Plus). Same risk as in get_frequentwords.py — passing field_wf="ID" on non-WoS data silently operates on an empty column. || keyword_growth() splits on sep=";" by default, which matches WoS keyword serialisation. Scopus uses "; " (with trailing space) so terms may arrive with leading spaces (e.g. " MACHINE LEARNING") that survive the .upper() call and prevent correct term matching or synonym replacement.
+5) data['Year'].min() and data['Year'].max() in keyword_growth() will raise a ValueError if PY is empty after dropna. No guard exists for empty DataFrames after filtering. || Leading/trailing whitespace in terms not stripped before Counter/groupby. Terms like " MACHINE LEARNING" and "MACHINE LEARNING" are counted separately, fragmenting frequencies.
+6) **Yes**. The ETL must: Cast PY to int with no nulls — required by keyword_growth() for year range construction. || Ensure DE and ID are list[str] so the isinstance(x, str) branch in keyword_growth() is never taken, avoiding semicolon-split issues entirely. || Ensure ID is [] for non-WoS sources. || TI and AB must be str, not NaN/None.
 
 ### get_worldmapcollaboration.py
-...
+1) Builds an interactive historiographic network map showing citation relationships between key papers over time. It calls metaTagExtraction() and histNetwork() from services to construct the citation graph, then histPlot() for the initial layout. It then rebuilds the graph with networkx, optionally removes isolated nodes, positions nodes on a timeline (x = year, y = cluster), computes node sizes from local citation scores (LCS), and renders an interactive pyvis HTML network saved to a temp file. Returns the plot object, a metadata DataFrame, and the temp HTML filename.
+2) **www.services**.
+3) **SR, CR, DOI, AU, TI, DE, ID, PY**
+4) histNetwork() parses CR using WoS reference string format ("Author, Year, Journal, Vol, Page"). This is the most WoS-specific dependency in the entire codebase. Non-WoS CR strings will produce zero or wrong citation matches, resulting in an empty or disconnected graph. || metaTagExtraction(df, "SR") regenerates SR from WoS-style author/year/journal fields. If SR was not correctly populated by ETL, this call may produce malformed node identifiers that break edge matching. || node_label="ID" and node_label="DE" are swapped. The code maps "ID" → row.get("Author_Keywords") and "DE" → row.get("KeywordsPlus"), which is the reverse of the standard schema (DE = author keywords, ID = Keywords Plus). This is a WoS internal naming artefact from histNetwork() output columns.
+5) DE/ID label mapping is inverted (as noted above). A user selecting node_label="DE" gets Keywords Plus, not author keywords. Needs a one-line swap or renaming in histNetwork() output. || eval() used again for DE/ID node labels (same pattern as get_frequentwords.py). Unsafe and redundant if ETL guarantees list[str]. || hist_data["GCS"] cast to int in tooltip without null guard — if GCS is NaN, int(row.get('GCS', 0)) will raise a ValueError because int(float('nan')) fails in Python.
+6) **Yes, high priority**. Populate SR correctly as "FirstAuthor, Year, Journal" — it is the primary node key for the entire graph. || Normalise CR entries to WoS reference string format, as histNetwork() depends on it for edge construction. This is the single highest-risk dependency in the project for non-WoS sources. || Ensure DOI is str, empty string "" if missing (not NaN). || Ensure DE and ID are list[str] to eliminate the eval() calls.
 
 
 
