@@ -211,7 +211,7 @@ It is used to verify that our ETL pipeline produces all required columns and to 
 1) Counts cumulative publications per institution over time and draws a line chart for the top-k institutions.
 2) **www.services**.
 3) **AU_UN**, **PY**.
-4) **No**, but `AU_UN` is only produced by WoS natively.
+4) **Indirectly yes**: the function itself has no explicit WoS condition, but it depends on `AU_UN`, which is an internal/derived affiliation column usually built during WoS-oriented preprocessing.
 5) Crashes if `AU_UN` is a plain string instead of a list, or if `PY` contains nulls.
 6) **Yes**. `AU_UN` must be a `list[str]` per row, `PY` must be non-null and numeric. The ETL must build `AU_UN` from `C1` for non-WoS sources.
 
@@ -571,7 +571,13 @@ It is used to verify that our ETL pipeline produces all required columns and to 
 |--------|---------|
 | AU | biblionetwork.py, get_relevantauthors.py, get_affiliationproductionovertime.py, get_authorlocalimpact.py, get_authorproductionovertime.py, get_collaborationnetwork.py, get_correspondingauthorcountries.py, get_localcitedauthors.py, get_lotkalaw.py, get_maininformations.py, get_table.py|
 | TI | get_frequentwords.py, get_authorproductionovertime.py, get_factorialanalysis.py, get_historiograph.py, get_table.py, get_thematicevolution.py (not directly), get_thematicmap.py (not directly), get_threefieldplot.py (not directly), get_treemap.py, get_trendtopics.py, get_wordcloud.py, get_wordfrequency.py|
-
+| PY | get_affiliationproductionovertime.py, get_annualproduction.py, get_authorlocalimpact.py, get_authorproductionovertime.py, get_averagecitations.py  |
+| AU_UN | get_affiliationproductionovertime.py, get_annualproduction.py, get_authorlocalimpact.py, |
+| TC | get_authorlocalimpact.py, get_authorproductionovertime.py, get_averagecitations.py, get_citedcountries.py,  |
+| SO | get_authorproductionovertime.py, get_bradfordlaw.py|
+| TI | get_authorproductionovertime.py, |
+| C1 | get_citedcountries.py, |
+| RP | get_citedcountries.py, |
 ### Files that need patching
 | File | Line | Issue |
 |------|------|-------|
