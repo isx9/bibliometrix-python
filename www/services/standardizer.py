@@ -125,6 +125,10 @@ def standardize_pubmed(record: dict) -> dict:
     # Step 1: rename simple fields
     result = apply_mapping(record, PUBMED_MAPPING)
 
+    # LA comes as a list from PubMed e.g. ['eng'], extract first element
+    la = record.get("lang", "")
+    result["LA"] = la[0] if isinstance(la, list) and len(la) > 0 else ""
+
     # Step 2: handle complex fields
     result["AU"] = parse_pubmed_authors(record)
     result["AF"] = parse_pubmed_authors(record)
@@ -281,6 +285,14 @@ def standardize_openalex(record: dict) -> dict:
     result.update(parse_openalex_biblio(record))
     result["DE"] = parse_openalex_keywords(record)
     result["CR"] = parse_openalex_references(record)
+
+    # DI — strip URL prefix and handle None
+    doi = record.get("doi", "") or ""
+    result["DI"] = doi.replace("https://doi.org/", "").replace("http://doi.org/", "")
+
+    # PY — OpenAlex returns an integer, cast to string
+    py = record.get("publication_year", "")
+    result["PY"] = str(py) if py is not None else ""
 
     # Step 3: fill missing fields with safe defaults
     result["ID"] = []
