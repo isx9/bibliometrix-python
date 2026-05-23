@@ -12,8 +12,37 @@ Main entry point:
 
 import pandas as pd
 from mappings import PUBMED_MAPPING, OPENALEX_MAPPING
-from metatagextraction import SR
 
+
+# NOTE: SR() is copied directly from www/services/metatagextraction.py
+# rather than imported. This is intentional.
+# metatagextraction.py uses a relative import (from .utils import *)
+# which only works when the file is loaded as part of a package.
+# When imported directly in a notebook or standalone script, Python
+# doesn't know it's part of a package and crashes with:
+# "attempted relative import with no known parent package"
+# Copying the function here avoids that problem entirely.
+
+def SR(M):
+    listAU = M["AU"].apply(lambda l: [x.strip() for x in l])
+    if M["DB"].iloc[0].lower() == "scopus":
+        listAU = listAU.apply(lambda l: [x.replace(" ", ",").replace(",,", ",").replace(" ", "") for x in l])
+    FirstAuthors = listAU.apply(lambda l: l[0] if len(l) > 0 else "NA").str.replace(",", " ")
+    no_art = M["JI"] == ""
+    M.loc[no_art, "JI"] = M.loc[no_art, "SO"]
+    J9 = M["JI"].str.replace(".", " ", regex=False).str.strip()
+    SR_col = FirstAuthors + ", " + M["PY"].astype(str) + ", " + J9
+    M["SR_FULL"] = SR_col.str.replace(r"\s+", " ", regex=True)
+    st = i = 0
+    while st == 0:
+        ind = SR_col.duplicated()
+        if ind.any():
+            i += 1
+            SR_col[ind] = SR_col[ind] + "-" + chr(96 + i)
+        else:
+            st = 1
+    M["SR"] = SR_col.str.replace(r"\s+", " ", regex=True)
+    return M
 
 def apply_mapping(record: dict, mapping: dict) -> dict:
     """
