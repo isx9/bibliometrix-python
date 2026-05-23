@@ -12,6 +12,7 @@ Main entry point:
 
 import pandas as pd
 from mappings import PUBMED_MAPPING, OPENALEX_MAPPING
+from metatagextraction import SR
 
 
 def apply_mapping(record: dict, mapping: dict) -> dict:
@@ -284,7 +285,9 @@ def standardize(records: list, source: str) -> pd.DataFrame:
         else:
             raise ValueError(f"Unsupported source: {source}. Choose 'pubmed' or 'openalex'.")
 
-    return pd.DataFrame(standardized)
+    df = pd.DataFrame(standardized)
+    df = SR(df)
+    return df
 
 
 
