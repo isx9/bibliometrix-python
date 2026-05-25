@@ -616,6 +616,7 @@ It is used to verify that our ETL pipeline produces all required columns and to 
 | histnetwork.py | 37 | if db == "Web_of_Science" |
 | biblionetwork.py | 94 | if db == "web_of_science" |
 | format_functions.py | multiple | if source == "Web_of_Science" |
+| couplingmap.py | multiple | Root dependency: assumes WoS-style SR/CR reconstruction through metaTagExtraction(), biblionetwork(), and histNetwork(); breaks bibliographic coupling on non-WoS sources |
 | get_authorproductionovertime.py | 28 |fallback str(x).split(",") assumes WoS comma-separated author format
 | get_citedcountries.py | 17 | metaTagExtraction(df, "AU1_CO") assumes WoS-style affiliation parsing |
 | get_citeddocuments.py | 17 | metaTagExtraction(df, "SR") rebuilds SR from WoS-style fields |
@@ -638,3 +639,23 @@ It is used to verify that our ETL pipeline produces all required columns and to 
 | get_referencesspectroscopy.py | 35 | regex r'\b\d{4},' extracts year assuming WoS reference format Author, Year, Journal, Vol, Page — non-WoS formats produce zero year matches |
 | get_relevantaffiliations.py | 20 | data["AU_UN"] is a WoS-derived column — does not exist natively in non-WoS sources and must be built by ETL from C1 |
 | get_relevantauthors.py | 22 | fallback else [] silently drops non-list AU values — non-WoS sources with semicolon-delimited strings produce empty results |
+| get_table.py | 91-125 | column_descriptions dictionary contains only WoS field tags — non-WoS columns appear without human-readable description |
+| get_thematicevolution.py | 4, 98 | field="ID" default assumes WoS Keywords Plus — thematic_map() produces empty results on non-WoS sources |
+| get_thematicmap.py | 4 | field="ID" default assumes WoS Keywords Plus — thematic_map() produces empty results on non-WoS sources |
+| get_threefieldplot.py | 24, 26 | metaTagExtraction(df, "CR_SO") and metaTagExtraction(df, "AU_CO") assume WoS-style reference strings and affiliation parsing |
+| get_treemap.py | 81, 91 | drop_duplicates(subset='SR') assumes SR always populated / eval(x) on DE/ID assumes WoS-style Python list serialization |
+| get_trendtopics.py | 40, 105 | field_tt="ID" routed directly to cocMatrix() — WoS-exclusive field produces empty results on non-WoS sources / np.repeat(df['PY'], x) used without null check |
+| get_wordcloud.py | 112, 125 | drop_duplicates(subset='SR') assumes SR always populated / eval(x) on DE/ID assumes WoS-style Python list serialization |
+| get_wordfrequency.py | 135 | x.split(sep) with default sep=";" assumes WoS keyword serialization — Scopus uses "; " producing terms with leading spaces |
+| get_worldmapcollaboration.py | 12 | metaTagExtraction(df, "AU_CO") assumes WoS-style affiliation parsing (C1/RP) to derive country per author |
+
+## Notes
+- `metatagextraction.py` is the primary root dependency for most WoS-specific parsing issues.
+  It reconstructs derived fields such as `AU_CO`, `AU1_CO`, `AU_UN`, `CR_SO`, `CR_AU`, and `SR`.
+  Patching this file first resolves cascading failures across many caller modules.
+
+- `couplingmap.py` is a secondary root dependency for bibliographic coupling workflows.
+  It relies on WoS-style `SR` and `CR` normalization through `metaTagExtraction()`,
+  `biblionetwork()`, and `histNetwork()`.
+  Caller-side fixes alone are insufficient if coupling normalization remains WoS-dependent.
+
