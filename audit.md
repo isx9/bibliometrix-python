@@ -616,4 +616,17 @@ It is used to verify that our ETL pipeline produces all required columns and to 
 | histnetwork.py | 37 | if db == "Web_of_Science" |
 | biblionetwork.py | 94 | if db == "web_of_science" |
 | format_functions.py | multiple | if source == "Web_of_Science" |
-
+| get_authorproductionovertime.py | 28 |fallback str(x).split(",") assumes WoS comma-separated author format
+| get_citedcountries.py | 17 | metaTagExtraction(df, "AU1_CO") assumes WoS-style affiliation parsing |
+| get_citeddocuments.py | 17 | metaTagExtraction(df, "SR") rebuilds SR from WoS-style fields |
+| get_clusteringcoupling.py | 10 | couplingMap() built for WoS-style SR and CR |
+| get_co_occurence_network.py | 38 | field names ID, DE, TI, AB, WC are WoS tags — ID is WoS-exclusive |
+| get_cocitation.py | 47 | metaTagExtraction(M, Field="CR_AU") and metaTagExtraction(M, Field="CR_SO") parse WoS-style reference strings |
+| get_collaborationnetwork.py | 55, 63 | metaTagExtraction(M, Field="AU_UN") and metaTagExtraction(M, Field="AU_CO") assume WoS-style affiliation strings |
+ get_correspondingauthorcountries.py | 16,17 | metaTagExtraction(df, Field="AU_CO") and (df, Field="AU1_CO") assume WoS-style affiliation parsing |
+| get_countriesproduction.py | 15 | metaTagExtraction(df, "AU_CO") assumes WoS-style affiliation parsing |
+| get_countriesproductionovertime.py | 15 | metaTagExtraction(df, "AU_CO") assumes WoS-style affiliation parsing |
+| get_database.py | 18-29 | database = "Web of Science" returns display string instead of standardized identifier (e.g. "WEB_OF_SCIENCE") |
+| get_factorialanalysis.py | 42 | field="ID" default assumes WoS Keywords Plus — field does not exist in non-WoS sources |
+| get_filters.py | 77-78 | LA and DT filter values assume WoS vocabulary ("Article", "English") — non-WoS sources may use different values |
+| get_frequentwords.py | 106 -119 | drop_duplicates(subset='SR') assumes SR always populated — crashes with KeyError if SR missing, eval(x) on DE/ID assumes WoS-style Python list serialization — breaks with Scopus semicolon-delimited strings |
