@@ -630,3 +630,11 @@ It is used to verify that our ETL pipeline produces all required columns and to 
 | get_factorialanalysis.py | 42 | field="ID" default assumes WoS Keywords Plus — field does not exist in non-WoS sources |
 | get_filters.py | 77-78 | LA and DT filter values assume WoS vocabulary ("Article", "English") — non-WoS sources may use different values |
 | get_frequentwords.py | 106 -119 | drop_duplicates(subset='SR') assumes SR always populated — crashes with KeyError if SR missing, eval(x) on DE/ID assumes WoS-style Python list serialization — breaks with Scopus semicolon-delimited strings |
+| get_historiograph.py | 30, 153-159 | metaTagExtraction(df, "SR") rebuilds SR from WoS-style author/year/journal fields eval() on Author_Keywords / KeywordsPlus — unsafe; DE/ID label mapping is inverted (WoS naming artefact) | 
+| get_localcitedauthors.py | 22, 29 | metaTagExtraction(df, "SR") rebuilds SR from WoS-style author/year/journal fields / histNetwork() parses CR assuming WoS format Author, Year, Journal, Vol, Page|
+| get_localciteddocuments.py | 16, 29 | metaTagExtraction(df, "SR") rebuilds SR from WoS-style fields / histNetwork() parses CR assuming WoS format Author, Year, Journal, Vol, Page |
+| get_localcitedsources.py | 17 | metaTagExtraction(df, "CR_SO") parses source names from WoS-style reference strings |
+| get_maininformations.py | 101 | metaTagExtraction(df, "AU_CO") assumes WoS-style affiliation parsing (C1/RP) to derive country per author |
+| get_referencesspectroscopy.py | 35 | regex r'\b\d{4},' extracts year assuming WoS reference format Author, Year, Journal, Vol, Page — non-WoS formats produce zero year matches |
+| get_relevantaffiliations.py | 20 | data["AU_UN"] is a WoS-derived column — does not exist natively in non-WoS sources and must be built by ETL from C1 |
+| get_relevantauthors.py | 22 | fallback else [] silently drops non-list AU values — non-WoS sources with semicolon-delimited strings produce empty results |
