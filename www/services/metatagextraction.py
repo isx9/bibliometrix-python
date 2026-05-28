@@ -4,19 +4,21 @@ from .utils import *
 def metaTagExtraction(df, Field="AU_CO", sep=";", aff_disamb=False):
     """
     Extract metadata tags from a DataFrame based on the specified field.
-    
+
     Args:
-        df: A DataFrame object containing the data.
+        df: A pandas DataFrame containing the bibliometric data.
         Field: The field to extract metadata tags from.
         sep: The separator used to split the metadata tags.
-        aff_disamb: A boolean value indicating whether to disambiguate the affiliations.
-    
+        aff_disamb: Boolean indicating whether to disambiguate affiliations.
+
     Returns:
-        A DataFrame with the extracted metadata tags.
+        A DataFrame with the extracted metadata tags added as new columns.
     """
-    #M = df.get() it doesn't work, because .get() must always have at least the column name.
-    #patch
+    # PATCH 1: df.get() non è un metodo pandas standard — era un metodo custom
+    # di un oggetto wrapper ora rimosso. Usiamo df.copy() per lavorare su una
+    # copia e non modificare il DataFrame originale passato dal chiamante.
     M = df.copy()
+
     if Field == "SR":
         M = SR(M)
 
@@ -37,23 +39,27 @@ def metaTagExtraction(df, Field="AU_CO", sep=";", aff_disamb=False):
             M = AU_UN(M, sep)
         else:
             M["AU_UN"] = M["C1"].str.replace(r"\[.*?\] ", "", regex=True)
-            M["AU1_UN"] = M["RP"].str.split(sep).apply(lambda l: l[0] if isinstance(l, list) else l)
+            M["AU1_UN"] = M["RP"].str.split(sep).apply(
+                lambda l: l[0] if isinstance(l, list) else l
+            )
             ind = M["AU1_UN"].str.find("),")
             a = ind[ind > -1].index
             M.loc[a, "AU1_UN"] = M.loc[a, "AU1_UN"].str[ind[a] + 2:]
 
-    #df.set(M)  patch--> delete df.set(M) pandas DataFrame does not have a.set() method.
-    #line is useless inside metaTagExtraction() you are already modifying M.
-    
-    #return df
-    #patch: the function creates M, modifies M, but returns original df without the new columns
+    # PATCH 1 (continua): df.set(M) rimosso — pandas DataFrame non ha .set().
+    # La funzione crea M, lo modifica e lo restituisce direttamente.
     return M
+
 
 def SR(M):
     listAU = M["AU"].apply(lambda l: [x.strip() for x in l])
     if M["DB"].iloc[0].lower() == "scopus":
-        listAU = listAU.apply(lambda l: [x.replace(" ", ",").replace(",,", ",").replace(" ", "") for x in l])
-    FirstAuthors = listAU.apply(lambda l: l[0] if len(l) > 0 else "NA").str.replace(",", " ")
+        listAU = listAU.apply(
+            lambda l: [x.replace(" ", ",").replace(",,", ",").replace(" ", "") for x in l]
+        )
+    FirstAuthors = listAU.apply(
+        lambda l: l[0] if len(l) > 0 else "NA"
+    ).str.replace(",", " ")
 
     no_art = M["JI"] == ""
     M.loc[no_art, "JI"] = M.loc[no_art, "SO"]
@@ -71,16 +77,17 @@ def SR(M):
         else:
             st = 1
     M["SR"] = SR.str.replace(r"\s+", " ", regex=True)
-    
+
     return M
 
 
-# TO BE DONE
 def CR_AU(M):
-    listCAU = M["CR"].apply(lambda x: x if isinstance(x, list) else []).apply(lambda l: [x for x in l if len(x) > 10])
+    listCAU = M["CR"].apply(
+        lambda x: x if isinstance(x, list) else []
+    ).apply(lambda l: [x for x in l if len(x) > 10])
     FCAU = listCAU.apply(lambda l: [x.split(",")[0].strip() for x in l])
     M["CR_AU"] = FCAU.apply(lambda l: ";".join(l))
-    
+
     return M
 
 
@@ -96,55 +103,85 @@ def CR_SO(M):
             lambda l: [x.split(",")[0].strip() for x in l if len(x.split(",")) > 2]
         )
 
-    # PATCH: avoid None values in ETL output
+    # PATCH 2: originale usava None per righe vuote (lambda l: ";".join(l) if l else None).
+    # None in una colonna stringa causa crash su operazioni .str.* downstream.
+    # → sostituito con "" (stringa vuota) per sicurezza e coerenza col modulo.
     M["CR_SO"] = FCAU.apply(lambda l: ";".join(l) if l else "")
 
     return M
 
 
 def AU_CO(M, log=False):
-    # Read the list of countries
+    # NOTA: path hardcoded — da parametrizzare in futuro se il working directory
+    # può variare tra ambienti (dev / prod / test).
     with open("www/static/countries.txt", "r") as file:
         countries = file.read().splitlines()
 
-    # Extract the countries from the affiliations
     M["AU_CO"] = None
     C1 = M["C1"]
-    
-    # Convert empty lists in C1 using the values from RP
-    C1 = M["C1"].fillna(M["RP"])
-    
+
+    # PATCH 3: fillna può produrre numpy.float64 (NaN numerico) quando sia C1
+    # che RP sono NaN — il loop sottostante tenta di iterare su quel float e crasha.
+    # .infer_objects(copy=False) silenziona anche il FutureWarning pandas 3.x sul
+    # downcast implicito di fillna.
+    # Dopo fillna forziamo ogni cella non-lista a [] per garantire iterabilità.
+    C1 = M["C1"].fillna(M["RP"]).infer_objects(copy=False)
+    C1 = C1.apply(lambda x: x if isinstance(x, list) else ([] if pd.isna(x) else [x]))
+
+    # NOTA: loop O(n) esplicito — accettabile per dataset tipici,
+    # ma vectorizzabile con .apply per grandi volumi.
     for i in range(len(C1)):
-        # Check if the element is an empty list
         if isinstance(C1.iloc[i], list) and not C1.iloc[i]:
-            if pd.notna(M["RP"].iloc[i]):  # Check if "RP" is valid
-                C1.at[i] = [M["RP"].iloc[i]]  # Use at to assign directly
-            else:  # If "RP" is also empty, assign an empty list
+            if pd.notna(M["RP"].iloc[i]):
+                C1.at[i] = [M["RP"].iloc[i]]
+            else:
                 C1.at[i] = []
 
-    # Extract the countries from the affiliations
     results = []
     for i in range(len(M)):
         countries_found = []
         for c1 in C1.iloc[i]:
             if pd.notna(c1):
-                ind = [c.upper() for c in countries if re.search(r'\b' + re.escape(c.upper()) + r'\b', c1.split(",")[-1].strip().upper())]
+                # PATCH 4: normalizza la stringa di input PRIMA della ricerca regex
+                # in modo che "Russian Federation" venga mappato a "Russia" nel
+                # dizionario countries.txt, dove è listato come "Russia".
+                # Senza questa normalizzazione il replace post-match non scatta mai
+                # perché il paese non viene trovato in primo luogo.
+                last_part = (
+                    c1.split(",")[-1].strip().upper()
+                    .replace("RUSSIAN FEDERATION", "RUSSIA")
+                    .replace("UNITED STATES", "USA")
+                    .replace("ENGLAND", "UNITED KINGDOM")
+                    .replace("SCOTLAND", "UNITED KINGDOM")
+                    .replace("WALES", "UNITED KINGDOM")
+                    .replace("NORTH IRELAND", "UNITED KINGDOM")
+                )
+                ind = [
+                    c.upper() for c in countries
+                    if re.search(
+                        r'\b' + re.escape(c.upper()) + r'\b',
+                        last_part
+                    )
+                ]
                 countries_found.extend(ind)
         results.append(countries_found)
 
-    # Assign results to the AU_CO column
     M["AU_CO"] = results
-    
-    # Replace country names with standardized names
-    M["AU_CO"] = M["AU_CO"].apply(lambda countries: [country.replace("UNITED STATES", "USA")
-                                                     .replace("RUSSIAN FEDERATION", "RUSSIA")
-                                                     .replace("TAIWAN", "CHINA")
-                                                     .replace("ENGLAND", "UNITED KINGDOM")
-                                                     .replace("SCOTLAND", "UNITED KINGDOM")
-                                                     .replace("WALES", "UNITED KINGDOM")
-                                                     .replace("NORTH IRELAND", "UNITED KINGDOM")
-                                                     for country in countries])
-    
+
+    M["AU_CO"] = M["AU_CO"].apply(
+        lambda countries: [
+            country
+            .replace("UNITED STATES", "USA")
+            .replace("RUSSIAN FEDERATION", "RUSSIA")
+            .replace("TAIWAN", "CHINA")
+            .replace("ENGLAND", "UNITED KINGDOM")
+            .replace("SCOTLAND", "UNITED KINGDOM")
+            .replace("WALES", "UNITED KINGDOM")
+            .replace("NORTH IRELAND", "UNITED KINGDOM")
+            for country in countries
+        ]
+    )
+
     if log:
         with open("affiliations.txt", "w", encoding="utf-8") as file:
             for affiliation in M["AU_CO"]:
@@ -154,54 +191,69 @@ def AU_CO(M, log=False):
 
 
 def AU1_CO(M, log=False):
-    # Read the list of countries
+    # NOTA: stesso path hardcoded di AU_CO — stessa raccomandazione.
     with open("www/static/countries.txt", "r") as file:
         countries = file.read().splitlines()
 
-    # Initialize the AU1_CO column
     M["AU1_CO"] = None
     C1 = M["C1"]
 
-    # Convert empty lists in C1 using the values from RP
-    C1 = M["C1"].fillna(M["RP"])
+    # PATCH 3 (AU1_CO): stesso fix di AU_CO — fillna può produrre float NaN
+    # non iterabile quando sia C1 che RP sono NaN.
+    # .infer_objects(copy=False) silenziona il FutureWarning pandas 3.x.
+    C1 = M["C1"].fillna(M["RP"]).infer_objects(copy=False)
+    C1 = C1.apply(lambda x: x if isinstance(x, list) else ([] if pd.isna(x) else [x]))
 
+    # NOTA: loop O(n) esplicito — vedere commento in AU_CO.
     for i in range(len(C1)):
-        # Check if the element is an empty list
         if isinstance(C1.iloc[i], list) and not C1.iloc[i]:
-            if pd.notna(M["RP"].iloc[i]):  # Check if "RP" is valid
-                C1.at[i] = [M["RP"].iloc[i]]  # Use at to assign directly
-            else:  # If "RP" is also empty, assign an empty list
+            if pd.notna(M["RP"].iloc[i]):
+                C1.at[i] = [M["RP"].iloc[i]]
+            else:
                 C1.at[i] = []
 
-    # Extract the first country found in the affiliations
     results = []
     for i in range(len(M)):
         first_country = None
         for c1 in C1.iloc[i]:
             if pd.notna(c1):
-                # Extract the last part of the affiliation string (typically the country)
-                last_part = c1.split(",")[-1].strip().upper()
-                # Search for the first matching country
+                # PATCH 4 (AU1_CO): normalizza prima della ricerca — stesso
+                # motivo di AU_CO (Russian Federation non presente in countries.txt).
+                last_part = (
+                    c1.split(",")[-1].strip().upper()
+                    .replace("RUSSIAN FEDERATION", "RUSSIA")
+                    .replace("UNITED STATES", "USA")
+                    .replace("ENGLAND", "UNITED KINGDOM")
+                    .replace("SCOTLAND", "UNITED KINGDOM")
+                    .replace("WALES", "UNITED KINGDOM")
+                    .replace("NORTH IRELAND", "UNITED KINGDOM")
+                )
                 for country in countries:
                     if re.search(r'\b' + re.escape(country.upper()) + r'\b', last_part):
                         first_country = country.upper()
                         break
             if first_country:
-                break  # Stop after finding the first country
+                break
         results.append(first_country)
 
-    # Assign results to the AU1_CO column
     M["AU1_CO"] = results
 
-    # Replace country names with standardized names
-    M["AU1_CO"] = M["AU1_CO"].apply(lambda country: country.replace("UNITED STATES", "USA")
-                                             .replace("RUSSIAN FEDERATION", "RUSSIA")
-                                             .replace("TAIWAN", "CHINA")
-                                             .replace("ENGLAND", "UNITED KINGDOM")
-                                             .replace("SCOTLAND", "UNITED KINGDOM")
-                                             .replace("WALES", "UNITED KINGDOM")
-                                             .replace("NORTH IRELAND", "UNITED KINGDOM")
-                                             if pd.notna(country) else "")
+    # PATCH 5: originale ritornava None per paese non trovato (else None).
+    # Sostituito con "" per coerenza con il resto del modulo.
+    # ATTENZIONE: i consumer di AU1_CO che usano `if country is None`
+    # devono essere aggiornati a `if not country` per catturare anche "".
+    M["AU1_CO"] = M["AU1_CO"].apply(
+        lambda country: country
+        .replace("UNITED STATES", "USA")
+        .replace("RUSSIAN FEDERATION", "RUSSIA")
+        .replace("TAIWAN", "CHINA")
+        .replace("ENGLAND", "UNITED KINGDOM")
+        .replace("SCOTLAND", "UNITED KINGDOM")
+        .replace("WALES", "UNITED KINGDOM")
+        .replace("NORTH IRELAND", "UNITED KINGDOM")
+        if pd.notna(country) else ""
+    )
+
     if log:
         with open("first_author_countries.txt", "w", encoding="utf-8") as file:
             for affiliation in M["AU1_CO"]:
@@ -210,7 +262,6 @@ def AU1_CO(M, log=False):
     return M
 
 
-# TO BE DONE
 def AU_UN(M, sep):
     C1 = M["C1"].fillna(M["RP"])
     AFF = C1.str.replace(r"\[.*?\] ", "", regex=True)
@@ -219,10 +270,15 @@ def AU_UN(M, sep):
     AFF = AFF.str.strip()
     listAFF = AFF.str.split(sep)
 
-    uTags = ["UNIV", "COLL", "SCH", "INST", "ACAD", "ECOLE", "CTR", "SCI", "CENTRE", "CENTER", "CENTRO", "HOSP", "ASSOC", "COUNCIL",
-             "FONDAZ", "FOUNDAT", "ISTIT", "LAB", "TECH", "RES", "CNR", "ARCH", "SCUOLA", "PATENT OFF", "CENT LIB", "HEALTH", "NATL",
-             "LIBRAR", "CLIN", "FDN", "OECD", "FAC", "WORLD BANK", "POLITECN", "INT MONETARY FUND", "CLIMA", "METEOR", "OFFICE", "ENVIR",
-             "CONSORTIUM", "OBSERVAT", "AGRI", "MIT ", "INFN", "SUNY "]
+    uTags = [
+        "UNIV", "COLL", "SCH", "INST", "ACAD", "ECOLE", "CTR", "SCI",
+        "CENTRE", "CENTER", "CENTRO", "HOSP", "ASSOC", "COUNCIL",
+        "FONDAZ", "FOUNDAT", "ISTIT", "LAB", "TECH", "RES", "CNR",
+        "ARCH", "SCUOLA", "PATENT OFF", "CENT LIB", "HEALTH", "NATL",
+        "LIBRAR", "CLIN", "FDN", "OECD", "FAC", "WORLD BANK", "POLITECN",
+        "INT MONETARY FUND", "CLIMA", "METEOR", "OFFICE", "ENVIR",
+        "CONSORTIUM", "OBSERVAT", "AGRI", "MIT ", "INFN", "SUNY "
+    ]
 
     def extract_affiliations(l):
         index = []
@@ -239,9 +295,16 @@ def AU_UN(M, sep):
         return ";".join(index)
 
     M["AU_UN"] = listAFF.apply(extract_affiliations)
+
     if M["DB"].iloc[0] in ["ISI", "OPENALEX"] and "C3" in M.columns:
-        M["AU_UN"].loc[M["C3"].notna() & (M["C3"] != "")] = M["C3"]
-        M["AU_UN"] = M["AU_UN"].str.split(sep).apply(lambda l: sep.join([x.strip() for x in l]))
+        # PATCH 6: originale usava M["AU_UN"].loc[...] = ... su una Series.
+        # Sintassi deprecata che causa SettingWithCopyWarning e può non
+        # modificare il DataFrame sottostante in alcune versioni di pandas.
+        # → corretto con M.loc[condition, "AU_UN"] = ... (forma raccomandata).
+        M.loc[M["C3"].notna() & (M["C3"] != ""), "AU_UN"] = M["C3"]
+        M["AU_UN"] = M["AU_UN"].str.split(sep).apply(
+            lambda l: sep.join([x.strip() for x in l])
+        )
 
     M["AU_UN"] = M["AU_UN"].str.replace(r"\\&", "AND", regex=True).str.replace("&", "AND", regex=False)
 
@@ -263,9 +326,12 @@ def AU_UN(M, sep):
         if indices:
             M.at[i, "AU_UN_NR"] = ";".join([listAFF.iloc[i][j] for j in indices])
 
-    # PATCH: avoid None values in ETL output
+    # PATCH 7: originale usava None come valore di replace
+    # (replace({"NOTDECLARED": None, "NOTREPORTED": None})).
+    # None in una colonna stringa causa crash su operazioni .str.* successive.
+    # → sostituito con "" (stringa vuota) per sicurezza e coerenza col modulo.
     M["AU_UN"] = M["AU_UN"].replace({"NOTDECLARED": "", "NOTREPORTED": ""})
     M["AU_UN"] = M["AU_UN"].str.replace("NOTREPORTED;", "", regex=False).str.replace(";NOTREPORTED", "", regex=False)
     M["AU_UN"] = M["AU_UN"].str.replace("NOTDECLARED;", "", regex=False).str.replace("NOTDECLARED", "", regex=False)
-    
+
     return M
