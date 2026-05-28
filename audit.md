@@ -1347,3 +1347,42 @@ WoS-specific logic:
 
 Relevant for ETL:
 VERY HIGH
+
+## couplingmap.py
+
+### Purpose
+Builds bibliographic coupling maps and thematic clustering visualizations for documents, authors, and sources.
+
+### Core Dependencies
+- CR
+- SR
+- AU
+- PY
+- TC
+- SO
+
+### WoS-Specific Logic
+- Assumes WoS-style `CR` formatting for bibliographic coupling.
+- Uses `SR` normalization through `metaTagExtraction()`.
+- `histNetwork()` and `biblionetwork()` depend on WoS-compatible references.
+- Coupling quality may fail on non-WoS sources unless ETL normalization is applied first.
+
+### Indirect Dependencies
+- metaTagExtraction()
+- histNetwork()
+- biblionetwork()
+- cocMatrix()
+- term_extraction()
+
+### Crash Risks
+- Missing `CR` → coupling network generation fails.
+- Missing `SR` → merge/join logic breaks.
+- Missing `PY` or `TC` → normalizeCitationScore() calculations fail.
+- Non-list `AU` values may break explode() operations.
+- Empty network matrices cause network_plot() failure.
+
+### Relevant for ETL
+YES
+
+### Notes
+`couplingmap.py` is a secondary root dependency for bibliographic coupling workflows and relies heavily on normalized WoS-compatible references.
