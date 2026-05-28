@@ -1,4 +1,5 @@
 from www.services import *
+import ast
 
 
 def get_frequent_words(df, ngram, num_of_words, word_type, file_upload_terms, file_upload_synonyms, field_separator_frequent=';'):
@@ -57,9 +58,13 @@ def get_frequent_words(df, ngram, num_of_words, word_type, file_upload_terms, fi
         color_continuous_scale=[(0, "lightblue"), (1, "darkblue")]
     )
 
-    # Customize traces
+    # PATCH 5: originale passava l'intera Series word_counts["Occurrences"] a
+    # marker.size in update_traces, sovrascrivendo size_max=60 già impostato in
+    # px.scatter e producendo marker fuori scala.
+    # → rimosso size da update_traces; px.scatter gestisce già la dimensione
+    # tramite size="Occurrences" e size_max=60.
     fig.update_traces(
-        marker=dict(opacity=1, size=word_counts["Occurrences"]),
+        marker=dict(opacity=1),
         textposition="middle center",
         textfont=dict(color="white", size=12)
     )
@@ -96,38 +101,60 @@ def get_frequent_words(df, ngram, num_of_words, word_type, file_upload_terms, fi
 
     return fig, table
 
+
 def table_tag(df, tag, ngrams=1, remove_terms=None, synonyms=None):
     """
     Extract and count words from a specified field in the DataFrame.
     """
-    M = df.get()
-    
+    # PATCH 1: df.get() non è un metodo pandas standard — era un metodo custom
+    # di un oggetto wrapper ora rimosso. Usiamo df.copy() per lavorare su una
+    # copia e non modificare il DataFrame originale passato dal chiamante.
+    M = df.copy()
+
     # Remove duplicates
     M = M.drop_duplicates(subset='SR')
-    
+
     # Get text data based on tag
     if tag in ['AB', 'TI']:
-        text_data = term_extraction(df, field=tag, stemming=False, verbose=False, 
-                                  ngrams=ngrams, remove_terms=remove_terms, synonyms=synonyms)
-        text_data = text_data.get()
+        # PATCH 2: term_extraction restituisce un DataFrame pandas — non ha il
+        # metodo .get(). Rimosso .get() e usato direttamente il risultato.
+        text_data = term_extraction(df, field=tag, stemming=False, verbose=False,
+                                    ngrams=ngrams, remove_terms=remove_terms, synonyms=synonyms)
         text_data = text_data[f"{tag}_TM"]
     else:
         text_data = M[tag]
 
     # Handle list columns (DE and ID)
     if tag in ['DE', 'ID']:
-        text_data = text_data.dropna().apply(lambda x: ', '.join(eval(x) if isinstance(x, str) else x))
+        # PATCH 3: eval(x) su stringhe provenienti da file esterni è pericoloso
+        # e crasha se la stringa non è una lista Python valida.
+        # → sostituito con ast.literal_eval dentro try/except per gestire
+        # stringhe malformate senza crash.
+        def safe_parse(x):
+            if isinstance(x, list):
+                return x
+            try:
+                return ast.literal_eval(x)
+            except (ValueError, SyntaxError):
+                return []
+
+        text_data = text_data.dropna().apply(lambda x: ', '.join(safe_parse(x)))
 
     # Process words
     if tag in ['DE', 'ID']:
         words = text_data.dropna().astype(str).str.cat(sep=', ').upper()
         words = [word.strip() for word in words.split(',') if word and word.strip()]
     else:
-        words = [item for sublist in text_data for item in sublist]
-
-    # Apply n-grams if needed
-    # if ngrams > 1 and tag not in ['DE', 'ID']:
-    #     words = [' '.join(words[i:i+ngrams]) for i in range(len(words)-ngrams+1)]
+        # PATCH 4: iterazione su text_data senza controllo del tipo — se un
+        # elemento è None o una stringa invece di una lista crasha con
+        # TypeError: 'NoneType' object is not iterable.
+        # → filtriamo solo gli elementi che sono liste prima di iterare.
+        words = [
+            item
+            for sublist in text_data
+            if isinstance(sublist, list)
+            for item in sublist
+        ]
 
     # Replace synonyms
     if synonyms:
@@ -137,9 +164,14 @@ def table_tag(df, tag, ngrams=1, remove_terms=None, synonyms=None):
     # Count words
     word_counts = Counter(words)
 
-    # Remove specified terms
-    if remove_terms and tag in ['DE', 'ID']:
-        word_counts = {word: count for word, count in word_counts.items() 
-                      if word.upper() not in [term.upper() for term in remove_terms]}
+    # PATCH 6: il filtro remove_terms era condizionato a tag in ['DE', 'ID'],
+    # quindi per TI e AB i termini da rimuovere venivano passati a term_extraction
+    # ma non filtrati sul word_counts finale — risultando di fatto ignorati.
+    # → rimossa la condizione: remove_terms viene ora applicato a tutti i tag.
+    if remove_terms:
+        word_counts = {
+            word: count for word, count in word_counts.items()
+            if word.upper() not in [term.upper() for term in remove_terms]
+        }
 
     return word_counts
