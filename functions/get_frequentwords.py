@@ -58,7 +58,7 @@ def get_frequent_words(df, ngram, num_of_words, word_type, file_upload_terms, fi
         color_continuous_scale=[(0, "lightblue"), (1, "darkblue")]
     )
 
-    # PATCH 5: originale passava l'intera Series word_counts["Occurrences"] a
+    # PATCH 1: originale passava l'intera Series word_counts["Occurrences"] a
     # marker.size in update_traces, sovrascrivendo size_max=60 già impostato in
     # px.scatter e producendo marker fuori scala.
     # → rimosso size da update_traces; px.scatter gestisce già la dimensione
@@ -106,7 +106,7 @@ def table_tag(df, tag, ngrams=1, remove_terms=None, synonyms=None):
     """
     Extract and count words from a specified field in the DataFrame.
     """
-    # PATCH 1: df.get() non è un metodo pandas standard — era un metodo custom
+    # PATCH 2: df.get() non è un metodo pandas standard — era un metodo custom
     # di un oggetto wrapper ora rimosso. Usiamo df.copy() per lavorare su una
     # copia e non modificare il DataFrame originale passato dal chiamante.
     M = df.copy()
@@ -116,7 +116,7 @@ def table_tag(df, tag, ngrams=1, remove_terms=None, synonyms=None):
 
     # Get text data based on tag
     if tag in ['AB', 'TI']:
-        # PATCH 2: term_extraction restituisce un DataFrame pandas — non ha il
+        # PATCH 3: term_extraction restituisce un DataFrame pandas — non ha il
         # metodo .get(). Rimosso .get() e usato direttamente il risultato.
         text_data = term_extraction(df, field=tag, stemming=False, verbose=False,
                                     ngrams=ngrams, remove_terms=remove_terms, synonyms=synonyms)
@@ -126,7 +126,7 @@ def table_tag(df, tag, ngrams=1, remove_terms=None, synonyms=None):
 
     # Handle list columns (DE and ID)
     if tag in ['DE', 'ID']:
-        # PATCH 3: eval(x) su stringhe provenienti da file esterni è pericoloso
+        # PATCH 4: eval(x) su stringhe provenienti da file esterni è pericoloso
         # e crasha se la stringa non è una lista Python valida.
         # → sostituito con ast.literal_eval dentro try/except per gestire
         # stringhe malformate senza crash.
@@ -145,7 +145,7 @@ def table_tag(df, tag, ngrams=1, remove_terms=None, synonyms=None):
         words = text_data.dropna().astype(str).str.cat(sep=', ').upper()
         words = [word.strip() for word in words.split(',') if word and word.strip()]
     else:
-        # PATCH 4: iterazione su text_data senza controllo del tipo — se un
+        # PATCH 5: iterazione su text_data senza controllo del tipo — se un
         # elemento è None o una stringa invece di una lista crasha con
         # TypeError: 'NoneType' object is not iterable.
         # → filtriamo solo gli elementi che sono liste prima di iterare.
