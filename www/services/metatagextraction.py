@@ -14,8 +14,9 @@ def metaTagExtraction(df, Field="AU_CO", sep=";", aff_disamb=False):
     Returns:
         A DataFrame with the extracted metadata tags.
     """
-    M = df.get()
-
+    #M = df.get() it doesn't work, because .get() must always have at least the column name.
+    #patch
+    M = df.copy()
     if Field == "SR":
         M = SR(M)
 
@@ -41,10 +42,12 @@ def metaTagExtraction(df, Field="AU_CO", sep=";", aff_disamb=False):
             a = ind[ind > -1].index
             M.loc[a, "AU1_UN"] = M.loc[a, "AU1_UN"].str[ind[a] + 2:]
 
-    df.set(M)
+    #df.set(M)  patch--> delete df.set(M) pandas DataFrame does not have a.set() method.
+    #line is useless inside metaTagExtraction() you are already modifying M.
     
-    return df
-
+    #return df
+    #patch: la funzione crea M, modifica M, ma restituisce df originale senza le nuove colonne
+    return M
 
 def SR(M):
     listAU = M["AU"].apply(lambda l: [x.strip() for x in l])
