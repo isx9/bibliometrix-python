@@ -1,64 +1,133 @@
 from .utils import *
 
 
-def cocMatrix(df, Field="AU", type="sparse", n=None, sep=";", binary=True, short=False, remove_terms=None, synonyms=None):
+def cocMatrix(
+    df,
+    Field="AU",
+    type="sparse",
+    n=None,
+    sep=";",
+    binary=True,
+    short=False,
+    remove_terms=None,
+    synonyms=None
+):
     """
     Computes occurrences between elements of a Tag Field from a bibliographic data frame.
-    
-    Args:
-        M: A DataFrame obtained by the converting function. It is a data matrix with cases corresponding to articles and variables to Field Tag in the original WoS or SCOPUS file.
-        Field: A string indicating one of the field tags of the standard ISI WoS Field Tag codify.
-        type: Indicates the output format of co-occurrences ("matrix" or "sparse").
-        n: An integer indicating the number of items to select. If None, all items are selected.
-        sep: The field separator character.
-        binary: A boolean. If True each cell contains a 0/1. If False each cell contains the frequency.
-        short: A boolean. If True all items with frequency < 2 are deleted to reduce the matrix size.
-        remove_terms: A list of additional terms to delete from the documents before term extraction.
-        synonyms: A list of synonyms that will be merged into a single term.
-        
-    Returns:
-        A bipartite network matrix with cases corresponding to manuscripts and variables to the objects extracted from the Tag Field.
     """
+
     M = df.get()
 
+    # SAFETY CHECK
+    if M is None or M.empty:
+        print("Input dataframe is empty")
+        return None
+
+    # SAFETY CHECK FOR SR
     if "LABEL" not in M.columns:
+        if "SR" not in M.columns:
+            print("SR column missing")
+            return None
+
         M.index = M["SR"]
         print("Processing field: " + Field + "\n")
+
     RowNames = M.index
 
     # REMOVE TERMS AND MERGE SYNONYMS
     if Field in ["ID", "DE", "TI", "TI_TM", "AB", "AB_TM"]:
-        Fi = M[Field].fillna("").apply(lambda x: x if isinstance(x, list) else [i.strip() for i in x.split(sep)])
-        TERMS = pd.DataFrame({"item": [item.upper() for sublist in Fi for item in sublist], "SR": M.index.repeat(Fi.str.len())})
+
+        if Field not in M.columns:
+            print(f"{Field} column missing")
+            return None
+
+        Fi = M[Field].fillna("").apply(
+            lambda x: x if isinstance(x, list)
+            else [i.strip() for i in str(x).split(sep)]
+        )
+
+        TERMS = pd.DataFrame({
+            "item": [
+                item.upper()
+                for sublist in Fi
+                for item in sublist
+            ],
+            "SR": M.index.repeat(Fi.str.len())
+        })
 
         # Merge synonyms
         if synonyms:
-            synonyms_dict = {syn.split(";")[0].strip().upper(): [s.strip().upper() for s in syn.split(";")[1:]] for syn in synonyms}
+            synonyms_dict = {
+                syn.split(";")[0].strip().upper():
+                [s.strip().upper() for s in syn.split(";")[1:]]
+                for syn in synonyms
+            }
+
             for key, values in synonyms_dict.items():
                 TERMS["item"] = TERMS["item"].replace(values, key)
 
         # Remove terms
         if remove_terms:
-            TERMS = TERMS[~TERMS["item"].str.upper().isin([term.strip().upper() for term in remove_terms])]
+            TERMS = TERMS[
+                ~TERMS["item"].str.upper().isin(
+                    [term.strip().upper() for term in remove_terms]
+                )
+            ]
 
-        TERMS = TERMS.groupby("SR")["item"].apply(lambda x: ";".join(x)).reset_index()
-        M = M.drop(columns=[Field, 'SR']).merge(TERMS, on="SR", how="left").rename(columns={"item": Field})
+        TERMS = TERMS.groupby("SR")["item"].apply(
+            lambda x: ";".join(x)
+        ).reset_index()
+
+        M = (
+            M.drop(columns=[Field, "SR"], errors="ignore")
+            .merge(TERMS, on="SR", how="left")
+            .rename(columns={"item": Field})
+        )
+
         M.index = RowNames
 
+    # SAFETY CHECK FOR CR
     if Field == "CR":
-        M["CR"] = M["CR"].apply(lambda x: [ref.replace("DOI;", "DOI ") for ref in x] if isinstance(x, list) else x)
 
+        if "CR" not in M.columns:
+            print("CR column missing")
+            return None
+
+        M["CR"] = M["CR"].apply(
+            lambda x: [
+                ref.replace("DOI;", "DOI ")
+                for ref in x
+            ] if isinstance(x, list) else x
+        )
+
+    # FIELD EXISTENCE CHECK
     if Field in M.columns:
-        Fi = M[Field].fillna("").apply(lambda x: x if isinstance(x, list) else [i.strip() for i in x.split(sep)])
+
+        Fi = M[Field].fillna("").apply(
+            lambda x: x if isinstance(x, list)
+            else [i.strip() for i in str(x).split(sep)]
+        )
+
     else:
         print(f"Field {Field} is not a column name of input data frame")
-        return
+        return None
 
-    Fi = Fi.apply(lambda x: [i.strip() for i in x])  # Equivalent to trim.leading in R
+    Fi = Fi.apply(lambda x: [i.strip() for i in x])
+
+    # DELETE INVALID REFERENCES
     if Field == "CR":
-        Fi = Fi.apply(lambda x: [i for i in x if len(i) > 10])  # Delete not congruent references
+        Fi = Fi.apply(
+            lambda x: [i for i in x if len(i) > 10]
+        )
 
-    allField = [item for sublist in Fi for item in sublist if item]
+    allField = [
+        item
+        for sublist in Fi
+        for item in sublist
+        if item
+    ]
+
+    # REDUCE REFERENCES
     if Field == "CR":
         allField = reduceRefs(allField)
         Fi = Fi.apply(reduceRefs)
@@ -68,6 +137,7 @@ def cocMatrix(df, Field="AU", type="sparse", n=None, sep=";", binary=True, short
 
     if n:
         uniqueField = uniqueField[:n]
+
     elif short:
         uniqueField = tabField[tabField > 1].index.tolist()
 
@@ -75,36 +145,63 @@ def cocMatrix(df, Field="AU", type="sparse", n=None, sep=";", binary=True, short
         print("Matrix is empty!!")
         return None
 
+    # MATRIX CREATION
     if type == "matrix" or not binary:
         WF = np.zeros((M.shape[0], len(uniqueField)))
+
     elif type == "sparse":
         WF = lil_matrix((M.shape[0], len(uniqueField)))
+
     else:
         print("Error in type argument")
-        return
+        return None
 
-    col_idx = {term: idx for idx, term in enumerate(uniqueField)}
-    row_idx = {sr: idx for idx, sr in enumerate(M.index)}
+    col_idx = {
+        term: idx
+        for idx, term in enumerate(uniqueField)
+    }
 
+    row_idx = {
+        sr: idx
+        for idx, sr in enumerate(M.index)
+    }
+
+    # BUILD MATRIX
     for i, terms in Fi.items():
+
         if terms:
+
             if binary:
-                indices = [col_idx[term] for term in set(terms) if term in col_idx]
+
+                indices = [
+                    col_idx[term]
+                    for term in set(terms)
+                    if term in col_idx
+                ]
+
                 WF[row_idx[i], indices] = 1
+
             else:
+
                 term_counts = pd.Series(terms).value_counts()
+
                 for term, count in term_counts.items():
+
                     if term in col_idx:
                         WF[row_idx[i], col_idx[term]] = count
 
     if type == "sparse" and not binary:
         WF = lil_matrix(WF)
 
-    # Convert the sparse matrix to a DataFrame for better readability
-    WF_df = pd.DataFrame(WF.toarray(), index=M.index, columns=uniqueField)
+    # CONVERT TO DATAFRAME
+    WF_df = pd.DataFrame(
+        WF.toarray(),
+        index=M.index,
+        columns=uniqueField
+    )
+
     if binary:
-        WF_df = WF_df.astype(int)  # Ensure binary values are 0 and 1
-    # print(WF_df)
+        WF_df = WF_df.astype(int)
 
     return WF_df
 
@@ -112,25 +209,27 @@ def cocMatrix(df, Field="AU", type="sparse", n=None, sep=";", binary=True, short
 def reduceRefs(refs):
     """
     Remove everything after "V" followed by a digit and "DOI " from references.
-
-    Args:
-        refs: A list of references to reduce.
-
-    Returns:
-        A list of reduced references.
     """
+
     reduced_refs = []
+
     for ref in refs:
-        # Remove everything after "V" followed by a digit
+
+        if not isinstance(ref, str):
+            continue
+
+        # Remove everything after V followed by digit
         v_match = re.search(r"V\d", ref)
+
         if v_match:
             ref = ref[:v_match.start()]
-        
-        # Remove everything after "DOI "
+
+        # Remove everything after DOI
         doi_match = re.search(r"DOI ", ref)
+
         if doi_match:
             ref = ref[:doi_match.start()]
-        
+
         reduced_refs.append(ref.strip())
 
     return reduced_refs

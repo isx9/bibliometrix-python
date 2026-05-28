@@ -1,116 +1,256 @@
+
 from www.services import *
 
 
 def get_cited_documents(df, num_of_cited_docs, cited_docs_measure):
     """
     Generate a plot and table of the most cited documents.
-    
-    Args:
-        df: A DataFrame object containing the data.
-        num_of_cited_docs: The number of top cited documents to display.
-        cited_docs_measure: The measure to use for ranking (either "TC" for total citations or "TCperYear" for citations per year).
-        
-    Returns:
-        A Plotly figure object and a DataFrame of the most cited documents.
     """
-    # Extract metadata tags for cited documents
-    df = metaTagExtraction(df, "SR")
-    df = df.get()
 
-    # Prepare the table for ranking documents
+    # SAFETY CHECK
+    if df is None:
+        return None, pd.DataFrame()
+
+    # EXTRACT SR
+    df = metaTagExtraction(df, "SR")
+
+    data = df.get()
+
+    # EMPTY CHECK
+    if data is None or data.empty:
+        return None, pd.DataFrame()
+
+    # REQUIRED COLUMNS
+    required_cols = ["SR", "TC", "PY"]
+
+    for col in required_cols:
+
+        if col not in data.columns:
+
+            if col in ["TC", "PY"]:
+                data[col] = 0
+            else:
+                data[col] = ""
+
+    # OPTIONAL COLUMN
+    if "DI" not in data.columns:
+        data["DI"] = ""
+
+    # SAFE NUMERIC CONVERSION
+    data["TC"] = pd.to_numeric(
+        data["TC"],
+        errors="coerce"
+    ).fillna(0)
+
+    data["PY"] = pd.to_numeric(
+        data["PY"],
+        errors="coerce"
+    )
+
+    # CURRENT YEAR
     current_year = pd.to_datetime("today").year
-    df["TCperYear"] = df["TC"] / (current_year + 1 - df["PY"])
-    
-    # Calculate NormalizedTC within each publication year
-    df["NormalizedTC"] = df.groupby("PY")["TC"].transform(lambda x: x / x.mean()).round(2)
-    
+
+    # PREVENT DIVISION BY ZERO
+    data["TCperYear"] = data.apply(
+        lambda row:
+        row["TC"] / max((current_year + 1 - row["PY"]), 1)
+        if pd.notna(row["PY"])
+        else 0,
+        axis=1
+    )
+
+    # SAFE NORMALIZATION
+    data["NormalizedTC"] = data.groupby("PY")["TC"].transform(
+        lambda x:
+        (x / x.mean()).round(2)
+        if x.mean() not in [0, np.nan]
+        else 0
+    )
+
+    # CLEAN SR
+    data["SR"] = (
+        data["SR"]
+        .fillna("")
+        .astype(str)
+        .str.strip()
+    )
+
+    # BUILD TABLE
     tab = (
-        df.reset_index(drop=True).dropna(subset=["SR"])
+        data.reset_index(drop=True)
+        .dropna(subset=["SR"])
+        .query("SR != ''")
         .groupby("SR", as_index=False)
-        .agg(DI=("DI", "first"), TotalCitation=("TC", "sum"), TCperYear=("TCperYear", lambda x: round(x.sum(), 1)), NormalizedTC=("NormalizedTC", "sum"))
+        .agg(
+            DI=("DI", "first"),
+            TotalCitation=("TC", "sum"),
+            TCperYear=("TCperYear", lambda x: round(x.sum(), 1)),
+            NormalizedTC=("NormalizedTC", "sum")
+        )
         .rename(columns={"SR": "Document"})
         .sort_values(by="TotalCitation", ascending=False)
     )
 
-    # Convert columns to numeric to ensure correct calculations
-    tab["TotalCitation"] = pd.to_numeric(tab["TotalCitation"])
-    tab["TCperYear"] = pd.to_numeric(tab["TCperYear"])
-    tab["NormalizedTC"] = pd.to_numeric(tab["NormalizedTC"])
-    tab = tab.sort_values(by="TotalCitation", ascending=False)
-    table = tab
+    # EMPTY CHECK
+    if tab.empty:
+        return None, pd.DataFrame()
+
+    # SAFE NUMERIC CONVERSION
+    for col in ["TotalCitation", "TCperYear", "NormalizedTC"]:
+
+        tab[col] = pd.to_numeric(
+            tab[col],
+            errors="coerce"
+        ).fillna(0)
+
+    table = tab.copy()
+
+    # LIMIT RESULTS
+    num_of_cited_docs = min(
+        int(num_of_cited_docs),
+        len(tab)
+    )
+
     tab = tab.head(num_of_cited_docs)
 
-    # Select the appropriate measure based on user input
+    # MEASURE SELECTION
     if cited_docs_measure == "total_cit":
-        tab = tab[["Document", "TotalCitation", "NormalizedTC"]]
+
+        tab = tab[
+            ["Document", "TotalCitation", "NormalizedTC"]
+        ]
+
         laby = "Global Citations"
+
     else:
-        tab = tab.sort_values(by="TCperYear", ascending=False)[["Document", "TCperYear", "NormalizedTC"]]
+
+        tab = (
+            tab.sort_values(
+                by="TCperYear",
+                ascending=False
+            )[
+                ["Document", "TCperYear", "NormalizedTC"]
+            ]
+        )
+
         laby = "Global Citations per Year"
 
-    # Create the plot (horizontal scatter with lines, similar to author plot)
+    # EMPTY CHECK
+    if tab.empty:
+        return None, table
+
+    # PLOT
     fig = go.Figure()
 
-    # Prepare y-ticks and labels
     y_labels = tab["Document"]
     y_vals = list(range(len(tab)))
 
-    # Add a thick line from each label to its marker
+    metric_col = tab.columns[1]
+
+    # SAFE MAX VALUE
+    max_metric = max(
+        tab[metric_col].max(),
+        1
+    )
+
+    # SHAPES
     for i, row in enumerate(tab.itertuples()):
+
         fig.add_shape(
             type="line",
             x0=0,
-            x1=getattr(row, tab.columns[1]),
+            x1=getattr(row, metric_col),
             y0=i,
             y1=i,
-            line=dict(color="#e0e0e0", width=5),
+            line=dict(
+                color="#e0e0e0",
+                width=5
+            ),
             layer="below",
         )
 
-    # Add scatter markers and text
+    # SCATTER
     fig.add_trace(
+
         go.Scatter(
-            x=tab[tab.columns[1]],
+            x=tab[metric_col],
             y=y_vals,
+
             mode="markers+text",
+
             marker=dict(
-                size=18 + 6 * (tab[tab.columns[1]] / tab[tab.columns[1]].max()),
-                color=tab[tab.columns[1]],
-                colorscale=[[0, "#B3D1F2"], [1, "#5567BB"]],
-                line=dict(width=1, color="#E0E0E0"),
+                size=18 + 6 * (
+                    tab[metric_col] / max_metric
+                ),
+
+                color=tab[metric_col],
+
+                colorscale=[
+                    [0, "#B3D1F2"],
+                    [1, "#5567BB"]
+                ],
+
+                line=dict(
+                    width=1,
+                    color="#E0E0E0"
+                ),
+
                 opacity=0.95,
                 showscale=False,
             ),
-            text=tab[tab.columns[1]],
+
+            text=tab[metric_col],
+
             textposition="top center",
-            textfont=dict(color="#5567BB", size=13),
+
+            textfont=dict(
+                color="#5567BB",
+                size=13
+            ),
+
             hovertemplate=(
                 "<b>Document:</b> %{customdata}<br>"
                 "<b>" + laby + ":</b> %{x}<extra></extra>"
             ),
+
             customdata=tab["Document"],
         )
     )
 
-    # Add horizontal grid lines for each document (lighter)
+    # GRID LINES
     for i in range(len(tab)):
+
         fig.add_shape(
             type="line",
             x0=0,
-            x1=tab[tab.columns[1]].max(),
+            x1=max_metric,
             y0=i,
             y1=i,
-            line=dict(color="#E0E0E0", width=2),
+            line=dict(
+                color="#E0E0E0",
+                width=2
+            ),
             layer="below",
         )
 
-    # Set x-axis ticks
-    max_x = tab[tab.columns[1]].max()
-    tick_step = max(1, int(max_x // 6))
-    x_ticks = list(range(0, int(max_x) + tick_step, tick_step))
-    if x_ticks[-1] < max_x:
-        x_ticks.append(int(max_x))
+    # X TICKS
+    tick_step = max(
+        1,
+        int(max_metric // 6)
+    )
 
+    x_ticks = list(
+        range(
+            0,
+            int(max_metric) + tick_step,
+            tick_step
+        )
+    )
+
+    if len(x_ticks) == 0:
+        x_ticks = [0]
+
+    # AXES
     fig.update_yaxes(
         tickvals=y_vals,
         ticktext=y_labels,
@@ -119,6 +259,7 @@ def get_cited_documents(df, num_of_cited_docs, cited_docs_measure):
         title="Document",
         tickfont=dict(size=13),
     )
+
     fig.update_xaxes(
         showgrid=True,
         gridcolor="#F0F0F0",
@@ -127,22 +268,51 @@ def get_cited_documents(df, num_of_cited_docs, cited_docs_measure):
         title=laby,
         tickfont=dict(size=13),
     )
+
+    # LAYOUT
     fig.update_layout(
         plot_bgcolor='white',
-        font=dict(color="#222222", size=14, family="Segoe UI, Arial"),
-        margin=dict(l=0, r=0, t=0, b=0),
-        height=50 + 90 * len(tab),
+
+        font=dict(
+            color="#222222",
+            size=14,
+            family="Segoe UI, Arial"
+        ),
+
+        margin=dict(
+            l=0,
+            r=0,
+            t=0,
+            b=0
+        ),
+
+        height=max(
+            400,
+            50 + 90 * len(tab)
+        ),
+
         showlegend=False,
+
         hoverlabel=dict(
             bgcolor="white",
             font_size=13,
             font_family="Segoe UI, Arial",
             bordercolor="#5567BB"
         ),
+
         coloraxis_showscale=False,
     )
+
     fig = go.FigureWidget(fig)
-    fig._config = fig._config | {'modeBarButtonsToRemove': ['pan', 'select', 'lasso2d', 'toImage'],
-                                 'displaylogo': False}
-    
+
+    fig._config = fig._config | {
+        'modeBarButtonsToRemove': [
+            'pan',
+            'select',
+            'lasso2d',
+            'toImage'
+        ],
+        'displaylogo': False
+    }
+
     return fig, table
