@@ -86,13 +86,19 @@ def CR_AU(M):
 
 def CR_SO(M):
     listCAU = M["CR"].apply(lambda x: x if isinstance(x, list) else [])
+
     if M["DB"].iloc[0].upper() != "SCOPUS":
-        FCAU = listCAU.apply(lambda l: [x.split(",")[2].strip() for x in l if len(x.split(",")) > 2])
+        FCAU = listCAU.apply(
+            lambda l: [x.split(",")[2].strip() for x in l if len(x.split(",")) > 2]
+        )
     else:
-        FCAU = listCAU.apply(lambda l: [x.split(",")[0].strip() for x in l if len(x.split(",")) > 2])        
-    
-    M["CR_SO"] = FCAU.apply(lambda l: ";".join(l) if l else None) # da checkare
-    
+        FCAU = listCAU.apply(
+            lambda l: [x.split(",")[0].strip() for x in l if len(x.split(",")) > 2]
+        )
+
+    # PATCH: avoid None values in ETL output
+    M["CR_SO"] = FCAU.apply(lambda l: ";".join(l) if l else "")
+
     return M
 
 
@@ -189,14 +195,13 @@ def AU1_CO(M, log=False):
 
     # Replace country names with standardized names
     M["AU1_CO"] = M["AU1_CO"].apply(lambda country: country.replace("UNITED STATES", "USA")
-                                                 .replace("RUSSIAN FEDERATION", "RUSSIA")
-                                                 .replace("TAIWAN", "CHINA")
-                                                 .replace("ENGLAND", "UNITED KINGDOM")
-                                                 .replace("SCOTLAND", "UNITED KINGDOM")
-                                                 .replace("WALES", "UNITED KINGDOM")
-                                                 .replace("NORTH IRELAND", "UNITED KINGDOM")
-                                                 if pd.notna(country) else None)
-    
+                                             .replace("RUSSIAN FEDERATION", "RUSSIA")
+                                             .replace("TAIWAN", "CHINA")
+                                             .replace("ENGLAND", "UNITED KINGDOM")
+                                             .replace("SCOTLAND", "UNITED KINGDOM")
+                                             .replace("WALES", "UNITED KINGDOM")
+                                             .replace("NORTH IRELAND", "UNITED KINGDOM")
+                                             if pd.notna(country) else "")
     if log:
         with open("first_author_countries.txt", "w", encoding="utf-8") as file:
             for affiliation in M["AU1_CO"]:
@@ -258,7 +263,8 @@ def AU_UN(M, sep):
         if indices:
             M.at[i, "AU_UN_NR"] = ";".join([listAFF.iloc[i][j] for j in indices])
 
-    M["AU_UN"] = M["AU_UN"].replace({"NOTDECLARED": None, "NOTREPORTED": None})
+    # PATCH: avoid None values in ETL output
+    M["AU_UN"] = M["AU_UN"].replace({"NOTDECLARED": "", "NOTREPORTED": ""})
     M["AU_UN"] = M["AU_UN"].str.replace("NOTREPORTED;", "", regex=False).str.replace(";NOTREPORTED", "", regex=False)
     M["AU_UN"] = M["AU_UN"].str.replace("NOTDECLARED;", "", regex=False).str.replace("NOTDECLARED", "", regex=False)
     
