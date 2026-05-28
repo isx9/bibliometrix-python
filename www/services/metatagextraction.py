@@ -46,7 +46,7 @@ def metaTagExtraction(df, Field="AU_CO", sep=";", aff_disamb=False):
     #line is useless inside metaTagExtraction() you are already modifying M.
     
     #return df
-    #patch: la funzione crea M, modifica M, ma restituisce df originale senza le nuove colonne
+    #patch: the function creates M, modifies M, but returns original df without the new columns
     return M
 
 def SR(M):
