@@ -4,7 +4,8 @@ import textwrap
 
 def get_three_field_plot(df, left_field, middle_field, right_field, left_field_items, middle_field_items, right_field_items):
     """
-    Generate a three-field plot (Sankey diagram) to visualize the main items of three fields and their relationships.
+    Generate a three-field plot (Sankey diagram) to visualize the main items
+    of three fields and their relationships.
 
     Args:
         df: A DataFrame object containing the data.
@@ -14,9 +15,9 @@ def get_three_field_plot(df, left_field, middle_field, right_field, left_field_i
         left_field_items: Number of items to plot for the left field.
         middle_field_items: Number of items to plot for the middle field.
         right_field_items: Number of items to plot for the right field.
-        
+
     Returns:
-        A Plotly figure object representing the three-field plot.
+        A Plotly FigureWidget representing the three-field Sankey diagram.
     """
     fields = [left_field, middle_field, right_field]
     n = [left_field_items, middle_field_items, right_field_items]
@@ -30,22 +31,30 @@ def get_three_field_plot(df, left_field, middle_field, right_field, left_field_i
     if "TI_TM" in fields:
         df = term_extraction(df, field="TI")
 
-    # Document x Attribute matrix Field LEFT
+    # Document x Attribute matrix — LEFT field
     WL = cocMatrix(df, fields[0], binary=True, n=n[0])
     n1 = min(n[0], WL.shape[1])
     TopL = WL.columns.tolist()
 
-    # Document x Attribute matrix Field MIDDLE
+    # Document x Attribute matrix — MIDDLE field
     WM = cocMatrix(df, fields[1], binary=True, n=n[1])
     n2 = min(n[1], WM.shape[1])
     TopM = WM.columns.tolist()
 
-    # Document x Attribute matrix Field RIGHT
+    # Document x Attribute matrix — RIGHT field
     WR = cocMatrix(df, fields[2], binary=True, n=n[2])
     n3 = min(n[2], WR.shape[1])
     TopR = WR.columns.tolist()
 
-    # Co-Occurrence Matrices
+    # PATCH 1: if cocMatrix returns an empty DataFrame for any field, n1/n2/n3
+    # is 0 and reassigning LM.index/columns with a mismatched range crashes
+    # with ValueError: Length mismatch.
+    # → return an empty figure early if any of the three matrices is empty.
+    if n1 == 0 or n2 == 0 or n3 == 0:
+        empty_fig = go.FigureWidget(go.Figure())
+        return empty_fig
+
+    # Co-occurrence matrices
     LM = WL.T.dot(WM)
     MR = WM.T.dot(WR)
 
@@ -54,31 +63,28 @@ def get_three_field_plot(df, left_field, middle_field, right_field, left_field_i
     MR.index = range(n1 + 1, n1 + n2 + 1)
     MR.columns = range(n1 + n2 + 1, n1 + n2 + n3 + 1)
 
-    # Melting matrices to get edges
+    # Melt matrices to get edge lists
     def melt_matrix(matrix):
         var1 = np.repeat(matrix.index.values, matrix.shape[1])
         var2 = np.tile(matrix.columns.values, matrix.shape[0])
         values = matrix.values.flatten()
-        melted_df = pd.DataFrame({'Var1': var1, 'Var2': var2, 'Value': values})
-        return melted_df
+        return pd.DataFrame({'Var1': var1, 'Var2': var2, 'Value': values})
 
     LMm = melt_matrix(LM)
     LMm["group"] = None
     MRm = melt_matrix(MR)
     MRm["group"] = None
 
-    # Concatenate edge data
     Edges = pd.concat([LMm, MRm], ignore_index=True)
     Edges['Var1'] = Edges['Var1'].astype(int)
     Edges['Var2'] = Edges['Var2'].astype(int)
     Edges.columns = ["from", "to", "Value", "group"]
     Edges = Edges.dropna(subset=['to', 'from'])
-    Edges['from'] = Edges['from'] - 1  # Make indices 0-based
+    Edges['from'] = Edges['from'] - 1
     Edges['to'] = Edges['to'] - 1
     Edges = Edges.drop(columns=['group'])
-    Edges = Edges[Edges["Value"] >= 1]  # Filter edges with weight >= min.flow
+    Edges = Edges[Edges["Value"] >= 1]
 
-    # Same as before up to where Nodes are created
     Nodes = pd.DataFrame({
         "Nodes": [*TopL, *TopM, *TopR],
         "group": [fields[0]] * len(TopL) + [fields[1]] * len(TopM) + [fields[2]] * len(TopR),
@@ -89,36 +95,38 @@ def get_three_field_plot(df, left_field, middle_field, right_field, left_field_i
     Edges.rename(columns={"Value": "weight"}, inplace=True)
     Edges = Edges[Edges["weight"] >= min_flow]
 
-    # Set x positions for nodes based on level
     Kx = len(Nodes['group'].unique())
     Ky = len(Nodes)
     Nodes['coordX'] = np.repeat(np.linspace(0, 1, Kx), Nodes['level'].value_counts().sort_index().values)
     Nodes['coordY'] = np.repeat(0.1, Ky)
 
-    # Set custom base colors for nodes by group for better distinction
     group_colors = {
-        fields[0]: "#3288BD",  # Blue
-        fields[1]: "#F46D43",  # Orange
-        fields[2]: "#66C2A5",  # Green
+        fields[0]: "#3288BD",
+        fields[1]: "#F46D43",
+        fields[2]: "#66C2A5",
     }
 
-    # Calculate node weights (sum of incoming and outgoing edge weights)
     node_weights = pd.concat([
         Edges.groupby('from')['weight'].sum(),
         Edges.groupby('to')['weight'].sum()
     ], axis=1).fillna(0).sum(axis=1)
     Nodes['weight'] = Nodes['id'].map(node_weights).fillna(0)
 
-    # Function to add opacity to a hex color based on node weight (higher weight = less transparent)
     def hex_to_rgba(hex_color, opacity):
         hex_color = hex_color.lstrip('#')
         rgb = tuple(int(hex_color[i:i + 2], 16) for i in (0, 2, 4))
         return f'rgba({rgb[0]},{rgb[1]},{rgb[2]},{opacity:.2f})'
 
-    # Normalize weights to [0.3, 1.0] for opacity (avoid fully transparent nodes)
     min_opacity, max_opacity = 0.3, 1.0
-    if Nodes['weight'].max() > 0:
-        norm_weights = (Nodes['weight'] - Nodes['weight'].min()) / (Nodes['weight'].max() - Nodes['weight'].min())
+
+    # PATCH 2: the original guard checked max > 0 but not max != min — if all
+    # nodes share the same weight, max - min is 0 and the normalization produces
+    # NaN in every opacity value.
+    # → added a second condition to ensure the range is non-zero before dividing.
+    weight_min = Nodes['weight'].min()
+    weight_max = Nodes['weight'].max()
+    if weight_max > 0 and weight_max != weight_min:
+        norm_weights = (Nodes['weight'] - weight_min) / (weight_max - weight_min)
         opacities = norm_weights * (max_opacity - min_opacity) + min_opacity
     else:
         opacities = np.full(len(Nodes), min_opacity)
@@ -128,23 +136,29 @@ def get_three_field_plot(df, left_field, middle_field, right_field, left_field_i
         for g, o in zip(Nodes['group'], opacities)
     ]
 
-    # Shorten long labels and add line breaks for better visibility
     def wrap_label(label, width=45):
         return "<br>".join(textwrap.wrap(str(label), width=width))
 
     Nodes['wrapped_label'] = Nodes['Nodes'].apply(lambda x: wrap_label(x, width=35))
 
-    # Identify and remove nodes with empty edges
+    # Remove isolated nodes (not connected to any edge)
     ind = set(Nodes['id']) - set(Edges['from']).union(set(Edges['to']))
     if ind:
         Nodes = Nodes[~Nodes['id'].isin(ind)]
         Nodes['idnew'] = range(len(Nodes))
         id_map = dict(zip(Nodes['id'], Nodes['idnew']))
-        Edges['from'] = Edges['from'].map(id_map)
-        Edges['to'] = Edges['to'].map(id_map)
+
+        # PATCH 3: if id_map does not cover all values in Edges['from'] or
+        # Edges['to'] (e.g. isolated nodes still referenced in edges after
+        # filtering), .map() produces NaN — the Sankey crashes with float
+        # indices instead of int.
+        # → drop edges whose endpoints are not in id_map before remapping,
+        # then cast to int to ensure valid Sankey indices.
+        Edges = Edges[Edges['from'].isin(id_map) & Edges['to'].isin(id_map)]
+        Edges['from'] = Edges['from'].map(id_map).astype(int)
+        Edges['to'] = Edges['to'].map(id_map).astype(int)
         Nodes['id'] = Nodes['idnew']
 
-    # Create figure
     fig = go.Figure(data=[go.Sankey(
         arrangement="snap",
         node=dict(
@@ -167,7 +181,6 @@ def get_three_field_plot(df, left_field, middle_field, right_field, left_field_i
         )
     )])
 
-    # Add group annotations at the top of each column
     for level, field in enumerate(fields, start=1):
         group_nodes = Nodes[Nodes['level'] == level]
         if not group_nodes.empty:
@@ -178,12 +191,11 @@ def get_three_field_plot(df, left_field, middle_field, right_field, left_field_i
                 text=f"<b>{wrap_label(field, width=18)}</b>",
                 showarrow=False,
                 xanchor='center',
-                font=dict(color=group_colors[field], family="Arial", size=15)  # Font size 
+                font=dict(color=group_colors[field], family="Arial", size=15)
             )
 
-    # Update layout for aesthetics and readability
     fig.update_layout(
-        font=dict(size=11, color='Black'),  # Font size
+        font=dict(size=11, color='Black'),
         margin=dict(l=80, r=80, b=50, t=120, pad=4),
         height=820,
         plot_bgcolor='white',
