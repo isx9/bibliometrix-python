@@ -1,9 +1,10 @@
 from www.services import *
+import ast
 
 
 def get_treemap(df, ngram, num_of_words, word_type, file_upload_terms, file_upload_synonyms, field_separator_frequent=';'):
     """
-    Generate a plot and table of the most frequent words.
+    Generate a treemap plot and table of the most frequent words.
     
     Args:
         df: A DataFrame object containing the data.
@@ -14,7 +15,7 @@ def get_treemap(df, ngram, num_of_words, word_type, file_upload_terms, file_uplo
         file_upload_synonyms: File containing synonyms.
         
     Returns:
-        A Plotly figure object and a DataFrame of the most frequent words.
+        A Plotly FigureWidget object and a DataFrame of the most frequent words.
     """
 
     # Load stopwords and synonyms
@@ -71,38 +72,60 @@ def get_treemap(df, ngram, num_of_words, word_type, file_upload_terms, file_uplo
 
     return fig, table
 
+
 def table_tag(df, tag, ngrams=1, remove_terms=None, synonyms=None):
     """
     Extract and count words from a specified field in the DataFrame.
     """
-    M = df.get()
-    
+    # PATCH 1: df.get() is not a standard pandas method — it was a custom method
+    # of a wrapper object that has since been removed. Using df.copy() to work on
+    # a copy and avoid mutating the original DataFrame passed by the caller.
+    M = df.copy()
+
     # Remove duplicates
     M = M.drop_duplicates(subset='SR')
-    
+
     # Get text data based on tag
     if tag in ['AB', 'TI']:
-        text_data = term_extraction(df, field=tag, stemming=False, verbose=False, 
-                                  ngrams=ngrams, remove_terms=remove_terms, synonyms=synonyms)
-        text_data = text_data.get()
+        # PATCH 2: term_extraction returns a pandas DataFrame which does not have
+        # a .get() method. Removed .get() and used the result directly.
+        text_data = term_extraction(df, field=tag, stemming=False, verbose=False,
+                                    ngrams=ngrams, remove_terms=remove_terms, synonyms=synonyms)
         text_data = text_data[f"{tag}_TM"]
     else:
         text_data = M[tag]
 
     # Handle list columns (DE and ID)
     if tag in ['DE', 'ID']:
-        text_data = text_data.dropna().apply(lambda x: ', '.join(eval(x) if isinstance(x, str) else x))
+        # PATCH 3: the original code used eval(x) on strings coming from external
+        # files, which is unsafe and crashes if the string is not a valid Python
+        # list. Replaced with ast.literal_eval inside a try/except to handle
+        # malformed strings without crashing.
+        def safe_parse(x):
+            if isinstance(x, list):
+                return x
+            try:
+                return ast.literal_eval(x)
+            except (ValueError, SyntaxError):
+                return []
+
+        text_data = text_data.dropna().apply(lambda x: ', '.join(safe_parse(x)))
 
     # Process words
     if tag in ['DE', 'ID']:
         words = text_data.dropna().astype(str).str.cat(sep=', ').upper()
         words = [word.strip() for word in words.split(',') if word and word.strip()]
     else:
-        words = [item for sublist in text_data for item in sublist]
-
-    # Apply n-grams if needed
-    # if ngrams > 1 and tag not in ['DE', 'ID']:
-    #     words = [' '.join(words[i:i+ngrams]) for i in range(len(words)-ngrams+1)]
+        # PATCH 4: iterating over text_data without type checking — if an element
+        # is None or a string instead of a list, it crashes with
+        # TypeError: 'NoneType' object is not iterable.
+        # → filter only list elements before iterating.
+        words = [
+            item
+            for sublist in text_data
+            if isinstance(sublist, list)
+            for item in sublist
+        ]
 
     # Replace synonyms
     if synonyms:
@@ -112,9 +135,14 @@ def table_tag(df, tag, ngrams=1, remove_terms=None, synonyms=None):
     # Count words
     word_counts = Counter(words)
 
-    # Remove specified terms
-    if remove_terms and tag in ['DE', 'ID']:
-        word_counts = {word: count for word, count in word_counts.items() 
-                      if word.upper() not in [term.upper() for term in remove_terms]}
+    # PATCH 5: the remove_terms filter was conditioned on tag in ['DE', 'ID'],
+    # so for TI and AB the terms to remove were passed to term_extraction but
+    # never filtered on the final word_counts — effectively being ignored.
+    # → removed the condition: remove_terms is now applied to all tags.
+    if remove_terms:
+        word_counts = {
+            word: count for word, count in word_counts.items()
+            if word.upper() not in [term.upper() for term in remove_terms]
+        }
 
     return word_counts
