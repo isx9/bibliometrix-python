@@ -15,7 +15,8 @@ def get_word_frequency(df, ngram, field_wf, file_upload_terms_wf, file_upload_sy
         top_words: The number of top words to display.
 
     Returns:
-        A Plotly figure object representing the word frequency over time.
+        A Plotly FigureWidget object representing the word frequency over time
+        and a DataFrame of word frequencies per year.
     """
     # Load terms to remove
     remove_terms = None
@@ -34,25 +35,34 @@ def get_word_frequency(df, ngram, field_wf, file_upload_terms_wf, file_upload_sy
                 values = terms[1:]
                 synonyms[key] = values
 
-    # Set ngrams based on word_type
+    # Set ngrams based on field_wf
     ngrams = int(ngram) if field_wf in ['TI', 'AB'] else 1
 
-    data = term_extraction(df, field=field_wf, stemming=False, verbose=False, 
-                                ngrams=ngrams, remove_terms=remove_terms, synonyms=synonyms)
-    data = data.get()
+    # PATCH 1: term_extraction returns a pandas DataFrame which does not have
+    # a .get() method. Removed .get() and used the result directly.
+    data = term_extraction(df, field=field_wf, stemming=False, verbose=False,
+                           ngrams=ngrams, remove_terms=remove_terms, synonyms=synonyms)
     if field_wf == 'TI':
         print(data[f"{field_wf}_TM"])
 
     # Calculate word frequency
     if field_wf in ['AB', 'TI']:
-        word_freq = keyword_growth(data, tag=f"{field_wf}_TM", top=top_words[1], cdf=(occurrences == 'cumulate'), remove_terms=remove_terms, synonyms=synonyms)
+        word_freq = keyword_growth(data, tag=f"{field_wf}_TM", top=top_words[1], cdf=(occurrences == 'cumulate'),
+                                   remove_terms=remove_terms, synonyms=synonyms)
     else:
-        word_freq = keyword_growth(data, tag=field_wf, top=top_words[1], cdf=(occurrences == 'cumulate'), remove_terms=remove_terms, synonyms=synonyms)
+        word_freq = keyword_growth(data, tag=field_wf, top=top_words[1], cdf=(occurrences == 'cumulate'),
+                                   remove_terms=remove_terms, synonyms=synonyms)
 
+    # PATCH 2: top_words[1] was used both as the max number of terms in
+    # keyword_growth and as a column slice index. If top_words[0] >= number of
+    # available columns, or top_words has fewer than 2 elements, this crashes
+    # with IndexError. Added bounds clamping to avoid out-of-range slicing.
+    available_cols = [c for c in word_freq.columns if c != 'Year']
+    start = max(0, min(top_words[0], len(available_cols)))
+    end = max(0, min(top_words[1] + 1, len(available_cols)))
+    selected_cols = available_cols[start:end]
+    word_freq = word_freq[['Year'] + selected_cols]
 
-    # Select terms between top_words[1] and top_words[2]
-    word_freq = word_freq[['Year'] + word_freq.columns[top_words[0]:top_words[1] + 1].tolist()]
-    
     # Reshape the data for plotting
     word_freq_melted = word_freq.melt(id_vars=['Year'], var_name='Term', value_name='Frequency')
 
@@ -98,9 +108,24 @@ def get_word_frequency(df, ngram, field_wf, file_upload_terms_wf, file_upload_sy
 
     return fig, word_freq
 
-# Funzioni ausiliarie
+
 def trim_years(w, year_range, cdf=True):
-    """Funzione per calcolare frequenze cumulative o annuali."""
+    """
+    Calculate cumulative or annual frequencies aligned to a year range.
+
+    Args:
+        w: A pandas Series indexed by year with frequency values.
+        year_range: The range of years to align to.
+        cdf: If True, compute cumulative frequencies.
+
+    Returns:
+        A pandas Series with frequencies aligned to year_range.
+    """
+    # PATCH 5: if year_range is empty (e.g. after filtering), return an empty
+    # Series immediately instead of producing an inconsistent zero-length result.
+    if len(year_range) == 0:
+        return pd.Series([], dtype=float)
+
     W = np.zeros(len(year_range))
     Y = np.array(list(w.index))
     w_values = np.array(w)
@@ -121,39 +146,65 @@ def trim_years(w, year_range, cdf=True):
 
 def keyword_growth(df, tag, sep=";", top=10, cdf=True, remove_terms=None, synonyms=None):
     """
-    Simula la funzione KeywordGrowth in R.
-    df: dataframe con i dati.
-    tag: colonna da analizzare.
-    sep: separatore per il parsing.
-    top: numero massimo di termini da considerare.
-    cdf: se True, calcola occorrenze cumulative.
-    remove_terms: lista di termini da rimuovere.
-    synonyms: dizionario {termine_sostituto: [lista_di_sinonimi]}.
+    Compute keyword frequency growth over time.
+
+    Args:
+        df: DataFrame with bibliometric data.
+        tag: Column to analyze.
+        sep: Separator for string parsing.
+        top: Maximum number of terms to consider.
+        cdf: If True, compute cumulative occurrences.
+        remove_terms: List of terms to remove.
+        synonyms: Dict {replacement_term: [list_of_synonyms]}.
+
+    Returns:
+        A DataFrame with one column per top term and one row per year.
     """
-    # Parsing e filtraggio
     df = df.dropna(subset=[tag])
-    expanded = [item.upper() for sublist in df[tag].apply(lambda x: x.split(sep) if isinstance(x, str) else x) for item in sublist]
-    years = df.loc[df.index.repeat(df[tag].apply(lambda x: len(x.split(sep)) if isinstance(x, str) else len(x))), 'PY'].values
+
+    # PATCH 4: iterating over elements without type checking — if an element is
+    # neither a string nor a list (e.g. None or float NaN after dropna on other
+    # columns), iterating over it crashes with TypeError.
+    # → skip elements that are not string or list before expanding.
+    def safe_split(x):
+        if isinstance(x, str):
+            return x.split(sep)
+        if isinstance(x, list):
+            return x
+        return []
+
+    expanded = [item.upper() for sublist in df[tag].apply(safe_split) for item in sublist]
+    years = df.loc[
+        df.index.repeat(df[tag].apply(lambda x: len(x.split(sep)) if isinstance(x, str) else len(x) if isinstance(x, list) else 0)),
+        'PY'
+    ].values
     data = pd.DataFrame({'Term': expanded, 'Year': years})
-    
-    # Rimuovi terms
+
+    # Remove terms
     if remove_terms:
         data = data[~data['Term'].str.upper().isin([term.upper() for term in remove_terms])]
-    
-    # Gestione dei sinonimi
+
+    # Handle synonyms
     if synonyms:
         for main_term, syns in synonyms.items():
             data['Term'] = data['Term'].replace(syns, main_term.upper())
-    
-    # Aggregazione
+
+    # PATCH 3: if data is empty after filtering (all terms removed or no valid
+    # rows), data['Year'].min() and .max() return NaN and range(NaN, NaN)
+    # crashes with TypeError.
+    # → return an empty DataFrame with just a Year column instead of crashing.
+    if data.empty:
+        return pd.DataFrame(columns=['Year'])
+
+    # Aggregation
     freq = data.groupby(['Term', 'Year']).size().reset_index(name='Freq')
-    year_range = range(data['Year'].min(), data['Year'].max() + 1)
-    
-    # Selezione dei termini più frequenti
+    year_range = range(int(data['Year'].min()), int(data['Year'].max()) + 1)
+
+    # Select most frequent terms
     top_terms = freq.groupby('Term')['Freq'].sum().nlargest(top).index
     freq = freq[freq['Term'].isin(top_terms)]
 
-    # Costruzione del dataframe finale
+    # Build final DataFrame
     results = pd.DataFrame({'Year': year_range})
     for term in top_terms:
         term_freq = freq[freq['Term'] == term].set_index('Year')['Freq']
