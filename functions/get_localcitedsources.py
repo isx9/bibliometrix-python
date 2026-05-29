@@ -4,58 +4,118 @@ from www.services import *
 def get_local_cited_sources(df, num_of_cited_sources):
     """
     Generate a plot and table of the most local cited sources.
-    
-    Args:
-        input: An object that provides user input methods.
-        df: A DataFrame object containing the data.
-        num_of_cited_sources: The number of top cited sources to display.
-        
-    Returns:
-        A Plotly figure object and a DataFrame of the most local cited sources.
     """
-    # Extract metadata tags for cited sources
+
     df = metaTagExtraction(df, "CR_SO")
+    data = df.get().copy()
 
-    data = df.get()
-    
-    if isinstance(data["CR_SO"].iloc[0], list):  # Check if the first element is a list
-        # Flatten the 'CR_SO' column containing lists
+    # Ensure CR_SO exists
+    if "CR_SO" not in data.columns:
+        print("CR_SO column missing")
+        return go.FigureWidget(go.Figure()), pd.DataFrame()
+
+    # Fill missing values safely
+    data["CR_SO"] = data["CR_SO"].fillna("")
+
+    # Handle both list and string formats safely
+    if len(data) == 0:
+        return go.FigureWidget(go.Figure()), pd.DataFrame()
+
+    first_valid = data["CR_SO"].dropna()
+
+    if len(first_valid) == 0:
+        return go.FigureWidget(go.Figure()), pd.DataFrame()
+
+    first_value = first_valid.iloc[0]
+
+    if isinstance(first_value, list):
+
+        exploded = data["CR_SO"].explode()
+
+        exploded = exploded.dropna()
+        exploded = exploded.astype(str).str.strip()
+        exploded = exploded[exploded != ""]
+
         source_counts = (
-            pd.DataFrame(data["CR_SO"].explode())  # Explode lists into rows
-            .value_counts()  # Count occurrences
-            .reset_index()  # Reset index to get a DataFrame
+            exploded.value_counts()
+            .reset_index()
         )
+
         source_counts.columns = ["Sources", "N. of Local Citations"]
+
     else:
-        # If not a list, continue with the string method
-        source_counts = data["CR_SO"].str.split(";").explode().value_counts().reset_index()
+
+        exploded = (
+            data["CR_SO"]
+            .astype(str)
+            .str.split(";")
+            .explode()
+        )
+
+        exploded = exploded.dropna()
+        exploded = exploded.astype(str).str.strip()
+        exploded = exploded[exploded != ""]
+
+        source_counts = (
+            exploded.value_counts()
+            .reset_index()
+        )
+
         source_counts.columns = ["Sources", "N. of Local Citations"]
 
-    # Limit the number of sources to display
-    if num_of_cited_sources > len(source_counts):
-        num_of_cited_sources = len(source_counts)
+    # Handle empty results
+    if source_counts.empty:
+        print("No cited sources found")
+        return go.FigureWidget(go.Figure()), pd.DataFrame()
 
-    # Prepare the complete table and filter rows for display
+    # Remove invalid rows
+    source_counts["Sources"] = source_counts["Sources"].astype(str).str.strip()
+    source_counts = source_counts[source_counts["Sources"] != ""]
+
+    # Numeric safety
+    source_counts["N. of Local Citations"] = pd.to_numeric(
+        source_counts["N. of Local Citations"],
+        errors="coerce"
+    ).fillna(0)
+
+    source_counts = source_counts.sort_values(
+        by="N. of Local Citations",
+        ascending=False
+    )
+
+    # Limit safely
+    num_of_cited_sources = min(num_of_cited_sources, len(source_counts))
+
     table_located_sources = source_counts.copy()
-    source_counts = source_counts.head(num_of_cited_sources)
-    
 
-    # Truncate long source names and add line breaks every 50 characters
+    source_counts = source_counts.head(num_of_cited_sources).reset_index(drop=True)
+
+    # Safe wrapping
     def wrap_label(label, width=50):
-        return '<br>'.join([label[i:i+width] for i in range(0, len(label), width)])
+        label = str(label)
+        return '<br>'.join(
+            [label[i:i + width] for i in range(0, len(label), width)]
+        )
+
     source_counts["Sources_wrapped"] = source_counts["Sources"].apply(wrap_label)
 
-    # Create the plot (use scatter instead of scatter with orientation='h')
     fig = go.Figure()
 
-    # Add the main scatter plot
+    max_value = max(
+        source_counts["N. of Local Citations"].max(),
+        1
+    )
+
+    # Scatter plot
     fig.add_trace(
         go.Scatter(
             x=source_counts["N. of Local Citations"],
             y=list(range(len(source_counts))),
             mode="markers+text",
             marker=dict(
-                size=18 + 6 * (source_counts["N. of Local Citations"] / source_counts["N. of Local Citations"].max()),
+                size=18 + 6 * (
+                    source_counts["N. of Local Citations"] / max_value
+                ),
                 color=source_counts["N. of Local Citations"],
                 colorscale=[[0, "#B3D1F2"], [1, "#5567BB"]],
                 line=dict(width=1, color="#E0E0E0"),
@@ -63,8 +123,8 @@ def get_local_cited_sources(df, num_of_cited_sources):
                 showscale=False,
             ),
             text=source_counts["N. of Local Citations"],
-            textposition="top center",  
-            textfont=dict(color="#5567BB", size=13),  
+            textposition="top center",
+            textfont=dict(color="#5567BB", size=13),
             hovertemplate=(
                 "<b>Source:</b> %{customdata}<br>"
                 "<b>N. of Local Citations:</b> %{x}<extra></extra>"
@@ -73,8 +133,9 @@ def get_local_cited_sources(df, num_of_cited_sources):
         )
     )
 
-    # Add a thick line from label (x=0) to the marker for each source
+    # Background lines
     for i, x_val in enumerate(source_counts["N. of Local Citations"]):
+
         fig.add_shape(
             type="line",
             x0=0,
@@ -85,24 +146,25 @@ def get_local_cited_sources(df, num_of_cited_sources):
             layer="below",
         )
 
-    # Add horizontal grid lines for each source (lighter)
-    for i in range(len(source_counts)):
         fig.add_shape(
             type="line",
             x0=0,
-            x1=source_counts["N. of Local Citations"].max(),
+            x1=max_value,
             y0=i,
             y1=i,
             line=dict(color="#E0E0E0", width=2),
             layer="below",
         )
 
-    # Set x-axis ticks to 0, 50, 100, etc.
-    max_x = source_counts["N. of Local Citations"].max()
-    tick_step = 50
-    x_ticks = list(range(0, int(max_x) + tick_step, tick_step))
-    if x_ticks[-1] < max_x:
-        x_ticks.append(int(max_x))
+    # Tick safety
+    tick_step = max(1, int(max_value // 5))
+
+    x_ticks = list(
+        range(0, int(max_value) + tick_step, tick_step)
+    )
+
+    if x_ticks[-1] < max_value:
+        x_ticks.append(int(max_value))
 
     fig.update_yaxes(
         tickvals=list(range(len(source_counts))),
@@ -112,6 +174,7 @@ def get_local_cited_sources(df, num_of_cited_sources):
         title="Sources",
         tickfont=dict(size=13),
     )
+
     fig.update_xaxes(
         showgrid=True,
         gridcolor="#F0F0F0",
@@ -120,9 +183,14 @@ def get_local_cited_sources(df, num_of_cited_sources):
         title="N. of Local Citations",
         tickfont=dict(size=13),
     )
+
     fig.update_layout(
         plot_bgcolor='white',
-        font=dict(color="#222222", size=14, family="Segoe UI, Arial"),
+        font=dict(
+            color="#222222",
+            size=14,
+            family="Segoe UI, Arial"
+        ),
         margin=dict(l=220, r=40, t=60, b=40),
         height=50 + 90 * len(source_counts),
         showlegend=False,
@@ -133,8 +201,17 @@ def get_local_cited_sources(df, num_of_cited_sources):
             bordercolor="#5567BB"
         ),
     )
+
     fig = go.FigureWidget(fig)
-    fig._config = fig._config | {'modeBarButtonsToRemove': ['pan', 'select', 'lasso2d', 'toImage'],
-                                 'displaylogo': False}
-    
+
+    fig._config = fig._config | {
+        'modeBarButtonsToRemove': [
+            'pan',
+            'select',
+            'lasso2d',
+            'toImage'
+        ],
+        'displaylogo': False
+    }
+
     return fig, table_located_sources
