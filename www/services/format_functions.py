@@ -1455,6 +1455,7 @@ def process_single_file(data, source, file_type, author):
 
     if source == "wos":
         source = "Web_of_Science"
+    
         if file_type.endswith("bib"):
             file_type = ".bib"
             bib_parser = BibTexParser()
@@ -1581,18 +1582,37 @@ def biblio_json(data, source, type, author):
     """
     Format the data from the input file into JSON format.
 
+    This function supports:
+    - original bibliographic exports processed by process_single_file()
+    - ZIP archives
+    - standardized CSV files produced by the ETL pipeline
+
     Args:
         data: The path to the input file.
         source: The source of the data.
-        type: The type of the input file.
-        author: The author of the data.
+        type: The type/name of the input file.
+        author: The author format preference.
 
     Returns:
         A JSON string containing the formatted data.
     """
+
     if type.endswith("zip"):
         return process_zip_file(data, source, author)
 
+    # PATCH: support standardized CSV files produced by the ETL pipeline.
+    # These CSVs already contain WoS-like columns such as TI, AU, PY, SO, SR.
+    # Therefore they must not be re-parsed with the old WoS/Scopus/PubMed formatters.
+    if type.endswith("csv"):
+        df_csv = pd.read_csv(data, keep_default_na=False)
+
+        required_standard_cols = {"TI", "AU", "PY", "SO", "SR", "DB"}
+
+        if required_standard_cols.issubset(set(df_csv.columns)):
+            entries = df_csv.to_dict(orient="records")
+            return json.dumps(entries, ensure_ascii=False, indent=4)
+
     entries = process_single_file(data, source, type, author)
     json_data = json.dumps(entries, ensure_ascii=False, indent=4)
+
     return json_data

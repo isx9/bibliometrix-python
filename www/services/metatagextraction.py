@@ -4,20 +4,14 @@ from .utils import *
 def metaTagExtraction(df, Field="AU_CO", sep=";", aff_disamb=False):
     """
     Extract metadata tags from a DataFrame based on the specified field.
-
-    Args:
-        df: A pandas DataFrame containing the bibliometric data.
-        Field: The field to extract metadata tags from.
-        sep: The separator used to split the metadata tags.
-        aff_disamb: Boolean indicating whether to disambiguate affiliations.
-
-    Returns:
-        A DataFrame with the extracted metadata tags added as new columns.
+    Supports both pandas DataFrame and Shiny reactive.Value.
     """
-    # PATCH 1: df.get() non è un metodo pandas standard — era un metodo custom
-    # di un oggetto wrapper ora rimosso. Usiamo df.copy() per lavorare su una
-    # copia e non modificare il DataFrame originale passato dal chiamante.
-    M = df.copy()
+
+    # PATCH: support both Shiny reactive.Value and pandas DataFrame
+    if hasattr(df, "get"):
+        M = df.get().copy()
+    else:
+        M = df.copy()
 
     if Field == "SR":
         M = SR(M)
@@ -38,18 +32,19 @@ def metaTagExtraction(df, Field="AU_CO", sep=";", aff_disamb=False):
         if aff_disamb:
             M = AU_UN(M, sep)
         else:
-            M["AU_UN"] = M["C1"].str.replace(r"\[.*?\] ", "", regex=True)
-            M["AU1_UN"] = M["RP"].str.split(sep).apply(
+            M["AU_UN"] = M["C1"].apply(
+                lambda x: ";".join(x) if isinstance(x, list) else str(x)
+            ).str.replace(r"\[.*?\] ", "", regex=True)
+
+            M["AU1_UN"] = M["RP"].astype(str).str.split(sep).apply(
                 lambda l: l[0] if isinstance(l, list) else l
             )
+
             ind = M["AU1_UN"].str.find("),")
             a = ind[ind > -1].index
             M.loc[a, "AU1_UN"] = M.loc[a, "AU1_UN"].str[ind[a] + 2:]
 
-    # PATCH 1 (continua): df.set(M) rimosso — pandas DataFrame non ha .set().
-    # La funzione crea M, lo modifica e lo restituisce direttamente.
     return M
-
 
 def SR(M):
     listAU = M["AU"].apply(lambda l: [x.strip() for x in l])

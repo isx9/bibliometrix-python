@@ -122,13 +122,3 @@ def validate(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-
-
-
-
-
-
-
-
-
-

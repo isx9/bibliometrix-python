@@ -158,9 +158,7 @@ def get_main_informations(df, log=False):
 
     if "AU_CO" not in data.columns:
 
-        df = metaTagExtraction(df, "AU_CO")
-
-        data = df.get()
+        data = metaTagExtraction(df, "AU_CO")
 
     data["AU_CO"] = data["AU_CO"].apply(
         lambda x: x if isinstance(x, list) else []

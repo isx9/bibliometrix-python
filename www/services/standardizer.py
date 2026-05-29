@@ -329,7 +329,3 @@ def standardize(records: list, source: str) -> pd.DataFrame:
     df = pd.DataFrame(standardized)
     df = SR(df)
     return df
-
-
-
-
