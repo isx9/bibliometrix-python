@@ -22,13 +22,25 @@ def get_thematic_map(df, field="ID", n=250, minfreq=5, ngrams=1, stemming=False,
         subgraphs: Whether to show subgraphs.
 
     Returns:
-        A tuple containing the HTML file name and a DataFrame with the extracted terms.
+        A tuple containing the Plotly figure, HTML file name, words DataFrame,
+        clusters DataFrame, and document-to-cluster mapping DataFrame.
     """
-    
-    map, graph_path, words, clusters, documentToClusters = thematic_map(
+
+    # PATCH 1: thematic_map returns None when NetMatrix is empty — unpacking
+    # directly would crash with TypeError: cannot unpack non-iterable NoneType.
+    # → capture the full result first, check for None, and return a safe empty
+    # tuple before attempting to unpack.
+    # PATCH 2: the variable name `map` shadowed the Python builtin map()
+    # function — renamed to `thematic_map_result` to avoid the collision.
+    result = thematic_map(
         df, field=field, n=n, minfreq=minfreq, ngrams=ngrams, stemming=stemming, size=size,
         n_labels=n_labels, community_repulsion=community_repulsion, repel=repel,
         remove_terms=remove_terms, synonyms=synonyms, cluster=cluster, subgraphs=subgraphs
     )
-    
-    return map, graph_path, words, clusters, documentToClusters
+
+    if result[0] is None:
+        return None, None, pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+
+    thematic_map_result, graph_path, words, clusters, documentToClusters = result
+
+    return thematic_map_result, graph_path, words, clusters, documentToClusters
