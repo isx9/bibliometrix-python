@@ -76,10 +76,8 @@ def get_table(database, df, dpi=300, filter=False, modal=True):
         A tuple of (DataTable HTML, table HTML string, Plotly figure) if data
         is available, otherwise a message indicating no data.
     """
-    # PATCH 1: df.get() is not a standard pandas method — it was a custom method
-    # of a wrapper object that has since been removed. Using df.copy() to work
-    # on a copy and avoid mutating the original DataFrame passed by the caller.
-    data = df.copy()
+    
+    data = df.get()
 
     table_html = ""
     fig = None
