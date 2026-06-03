@@ -1,4 +1,3 @@
-"x8v3pa"
 from www.services import *
 
 
@@ -14,7 +13,8 @@ def get_local_cited_authors(df, num_of_cited_authors, fast_search=False):
     # ENSURE SR EXISTS
     df = metaTagExtraction(df, "SR")
 
-    M = df.get()
+    # PATCH: metaTagExtraction may return a reactive or a plain DataFrame
+    M = df.get() if hasattr(df, 'get') and callable(df.get) and not isinstance(df, pd.DataFrame) else df
 
     # EMPTY CHECK
     if M is None or M.empty:
@@ -73,7 +73,11 @@ def get_local_cited_authors(df, num_of_cited_authors, fast_search=False):
     if H is None:
         return None, pd.DataFrame()
 
+    # PATCH: if all LCS are 0 (common with OpenAlex due to URL-based references),
+    # return empty result immediately instead of hanging.
     M = H['M']
+    if 'LCS' not in M.columns or M['LCS'].sum() == 0:
+        return None, pd.DataFrame()
 
     # ENSURE REQUIRED OUTPUT COLUMNS
     required_output_cols = ['AU', 'LCS']
