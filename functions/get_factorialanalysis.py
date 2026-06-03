@@ -79,17 +79,16 @@ def get_factorial_analysis(
     # Set ngrams based on field
     ngrams = int(ngram) if field in ['TI', 'AB'] else 1
 
-    # PATCH 1: df.get() is not a standard pandas method — it was a custom method
-    # of a wrapper object that has since been removed. Using df.copy() to work on
-    # a copy and avoid mutating the original DataFrame passed by the caller.
-    M = df.copy()
+    # PATCH: df may be a Shiny reactive Value or a plain DataFrame
+    df_plain = df.get() if hasattr(df, 'get') and callable(df.get) and not isinstance(df, pd.DataFrame) else df
+    M = df_plain.copy()
     tab = table_tag(M, field, ngrams)
 
     if len(tab) >= 2:
         min_degree = list(tab.values())[min(n_terms, len(tab) - 1)]
 
         CS = conceptual_structure(
-            df=df,
+            df=df_plain, #patch
             method=method,
             field=field,
             min_degree=min_degree,

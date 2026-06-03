@@ -35,7 +35,8 @@ def get_collaboration_network(
     print("Generating collaboration network...")
 
     M = df
-    m = df.get()
+    m = df.get() if hasattr(df, 'get') and callable(df.get) and not isinstance(df, pd.DataFrame) else df
+
 
     NetRefs = None
     Title = ""
@@ -136,7 +137,10 @@ def get_collaboration_network(
         community_repulsion=repulsion / 2,
         verbose=False
     )
-
+    # PATCH: network_plot returns None when graph is empty
+    if netplot is None:
+        empty_fig = go.FigureWidget(go.Figure())
+        return "", empty_fig, pd.DataFrame(), empty_fig
     # --------------------------------------------------
     # PYVIS NETWORK
     # --------------------------------------------------

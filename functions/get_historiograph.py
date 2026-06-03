@@ -28,8 +28,16 @@ def get_historiograph(df, node_label="AU1", histNodes=20, hist_isolates=True, hi
     """
     # Pre-processing
     df = metaTagExtraction(df, "SR")
+    # PATCH: metaTagExtraction may return a plain DataFrame — wrap in reactive
+    # so histNetwork/cocMatrix can call .get() on it
+    if not hasattr(df, 'get') or isinstance(df, pd.DataFrame):
+        df = reactive.Value(df)
     hist_results = histNetwork(df, min_citations=0, sep=sep, network=True)
-
+    # PATCH: histNetwork returns None when no local citations are found
+    if hist_results is None:
+        raise ValueError("No citation data available for historiograph with this dataset.")
+    if hist_results is None or hist_results.get('NetMatrix') is None:
+        raise ValueError("No citation data available for historiograph with this dataset.")
     # 1. Initial graph construction
     hist_plot = histPlot(
         hist_results,

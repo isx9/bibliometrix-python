@@ -13,7 +13,8 @@ def get_world_map_collaboration(df, edges_min=1, edgesize=5):
     M = df
 
     df = metaTagExtraction(df, "AU_CO")
-    df = df.get()
+    # PATCH: metaTagExtraction may return a reactive or a plain DataFrame
+    df = df.get() if hasattr(df, 'get') and callable(df.get) and not isinstance(df, pd.DataFrame) else df
 
     # ---------------- SAFE COUNTRY COLUMN PATCH ----------------
     df["AU_CO"] = df["AU_CO"].fillna("").apply(
