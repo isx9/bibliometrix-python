@@ -11,9 +11,12 @@ def get_countries_production(df):
     Returns:
         A Plotly figure object representing the countries' scientific production and a DataFrame of the countries' scientific production.
     """
-    # Assicurati che i metadati siano stati estratti
+    
     df = metaTagExtraction(df, "AU_CO")
-    df = df.get()
+    # PATCH: metaTagExtraction may return a reactive or a plain DataFrame
+    df = df.get() if hasattr(df, 'get') and callable(df.get) and not isinstance(df, pd.DataFrame) else df
+    if df is None or df.empty:
+        return go.FigureWidget(go.Figure()), pd.DataFrame()
 
     # Conta le occorrenze dei paesi
     df["AU_CO"] = df["AU_CO"].apply(lambda x: x if isinstance(x, list) else [x])

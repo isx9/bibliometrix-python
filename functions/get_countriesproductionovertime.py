@@ -13,7 +13,11 @@ def get_countries_production_over_time(df, top_k_countries):
         A Plotly figure object representing the country's production over time.
     """
     df = metaTagExtraction(df, "AU_CO")
-    data = df.get()
+
+    # PATCH: metaTagExtraction may return a reactive or a plain DataFrame
+    data = df.get() if hasattr(df, 'get') and callable(df.get) and not isinstance(df, pd.DataFrame) else df
+    if data is None or data.empty:
+        return go.FigureWidget(go.Figure()), pd.DataFrame()
 
     AFF = pd.Series(data["AU_CO"]).dropna().apply(lambda x: [aff.strip() for aff in x if aff.strip() != ""])
     nAFF = [len(aff) for aff in AFF]
@@ -24,6 +28,10 @@ def get_countries_production_over_time(df, top_k_countries):
         "Affiliation": affiliations,
         "Year": years
     }).query('Affiliation != "NA"').dropna(subset=["Affiliation", "Year"])
+
+    # PATCH: safety check if AFFY is empty after filtering
+    if AFFY.empty:
+        return go.FigureWidget(go.Figure()), pd.DataFrame()
 
     AFFY = AFFY.groupby(["Affiliation", "Year"]).size().reset_index(name="Articles")
     AFFY = AFFY.pivot(index="Affiliation", columns="Year", values="Articles").fillna(0)
@@ -36,7 +44,10 @@ def get_countries_production_over_time(df, top_k_countries):
     AffOverTime["Year"] = AffOverTime["Year"].astype(int)
     AffOverTime = AffOverTime.rename(columns={"Affiliation": "Country"})
 
-    # Create the plot
+    # PATCH: safety check if AffOverTime is empty
+    if AffOverTime.empty:
+        return go.FigureWidget(go.Figure()), pd.DataFrame()
+
     fig = px.line(
         AffOverTime,
         x="Year",
@@ -45,7 +56,6 @@ def get_countries_production_over_time(df, top_k_countries):
         labels={"Year": "Year", "Articles": "Cumulative Articles", "Country": "Country"},
     )
 
-    # Customize the layout
     fig.update_layout(
         xaxis=dict(
             tickmode='array',
@@ -69,7 +79,6 @@ def get_countries_production_over_time(df, top_k_countries):
         )
     )
 
-    # Customize the grid
     fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='#EFEFEF')
     fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='#EFEFEF')
     fig = go.FigureWidget(fig)

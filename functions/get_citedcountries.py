@@ -15,7 +15,10 @@ def get_cited_countries(df, num_of_cited_countries, cited_countries_measure):
     """
     # Extract metadata tags for cited countries
     df = metaTagExtraction(df, "AU1_CO")
-    df = df.get()
+    # PATCH: metaTagExtraction may return a reactive or a plain DataFrame
+    df = df.get() if hasattr(df, 'get') and callable(df.get) and not isinstance(df, pd.DataFrame) else df
+    if df is None or df.empty:
+        return go.FigureWidget(go.Figure()), pd.DataFrame()
 
     # PATCH: filter rows where AU1_CO is an empty string (common with OpenAlex/PubMed
     # records that lack affiliation data). dropna alone does not catch empty strings.

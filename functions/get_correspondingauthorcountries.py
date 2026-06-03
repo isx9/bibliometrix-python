@@ -12,38 +12,42 @@ def get_corresponding_author_countries(df, top_k_countries):
     Returns:
         A Plotly figure object and a DataFrame of the most common corresponding author countries.
     """
-    # Estrai i metadati "AU_CO" e "AU1_CO" e verifica il tipo di dati
-    df = metaTagExtraction(df, Field="AU_CO")  # Assumendo che `metaTagExtraction` sia già definita
+    df = metaTagExtraction(df, Field="AU_CO")
     df = metaTagExtraction(df, Field="AU1_CO")
-    data = df.get()  # Se `df` è un oggetto reattivo
 
-    # Assicurati che le colonne siano di tipo stringa e rimuovi righe con valori mancanti
+    # PATCH: metaTagExtraction may return a reactive or a plain DataFrame
+    data = df.get() if hasattr(df, 'get') and callable(df.get) and not isinstance(df, pd.DataFrame) else df
+    if data is None or data.empty:
+        return go.FigureWidget(go.Figure()), pd.DataFrame()
+
+    # Remove missing values and empty country strings
     data = data.dropna(subset=["AU1_CO", "AU_CO"])
     data = data[data["AU1_CO"].str.strip() != ""]  # PATCH: filter empty country strings
+
+    # PATCH: safety check after filtering — may be empty if all countries were blank
+    if data.empty:
+        return go.FigureWidget(go.Figure()), pd.DataFrame()
+
     data["AU_CO"] = data["AU_CO"].apply(lambda x: ", ".join(x) if isinstance(x, list) else str(x))
     data["AU"] = data["AU"].apply(lambda x: ", ".join(x) if isinstance(x, list) else str(x))
 
-    # Determina il numero di collaborazioni per riga
+    # Determine number of collaborations per row
     data["nCO"] = data["AU_CO"].apply(lambda x: 1 if len(set(x.split(", "))) > 1 else 0)
 
-    # Conta il numero di articoli, SCP e MCP per paese
+    # Count articles, SCP and MCP per country
     country_counts = data.groupby("AU1_CO").agg(
         Articles=("AU", "count"),
         SCP=("nCO", lambda x: (x == 0).sum()),
         MCP=("nCO", lambda x: (x == 1).sum())
     ).reset_index()
 
-    # Rinomina la colonna "AU1_CO" in "Country"
     country_counts = country_counts.rename(columns={"AU1_CO": "Country"})
 
-    # Ordina i paesi per numero totale di articoli e seleziona i primi `top_k_countries`
     top_countries = country_counts.sort_values(by="Articles", ascending=False)
     top_country_names = top_countries["Country"].tolist()
 
-    # Filtra i dati per includere solo i paesi selezionati
     filtered_country_counts = country_counts[country_counts["Country"].isin(top_country_names)]
 
-    # Prepara i dati per il grafico
     filtered_country_counts["Country"] = pd.Categorical(
         filtered_country_counts["Country"], categories=top_country_names, ordered=True
     )
@@ -51,17 +55,14 @@ def get_corresponding_author_countries(df, top_k_countries):
     filtered_country_counts = filtered_country_counts.sort_values(by="Articles", ascending=False)
     table = filtered_country_counts
 
-    # Calcola la frequenza degli articoli e il rapporto MCP
     total_articles = filtered_country_counts["Articles"].sum()
     filtered_country_counts["Article_Freq"] = filtered_country_counts["Articles"] / total_articles
     filtered_country_counts["MCP_Ratio"] = filtered_country_counts["MCP"] / filtered_country_counts["Articles"]
 
-    # Rimuovi righe con valori mancanti nella colonna "Country"
     filtered_country_counts = filtered_country_counts.dropna(subset=["Country"])
     filtered_country_counts = filtered_country_counts.head(top_k_countries)
     filtered_country_counts = filtered_country_counts.sort_values(by="Articles", ascending=True)
 
-    # Crea il grafico
     fig = px.bar(
         filtered_country_counts.melt(id_vars="Country", value_vars=["SCP", "MCP"], var_name="Collaboration", value_name="Freq"),
         x="Freq",

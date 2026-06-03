@@ -12,9 +12,20 @@ def get_affiliation_production_over_time(df, top_k_affiliations):
     Returns:
         A Plotly figure object representing the affiliation's production over time.
     """
-    data = df.get()
+    # PATCH: AU_UN is a derived field — must be extracted before use.
+    # Without this call, AU_UN is missing and the function crashes.
+    df = metaTagExtraction(df, Field="AU_UN")
 
-    AFF = data["AU_UN"].dropna().apply(lambda x: [aff for aff in x if aff.strip() != ""])
+    # PATCH: metaTagExtraction may return a reactive or a plain DataFrame
+    data = df.get() if hasattr(df, 'get') and callable(df.get) and not isinstance(df, pd.DataFrame) else df
+    if data is None or data.empty:
+        return go.FigureWidget(go.Figure()), pd.DataFrame()
+
+    # PATCH: AU_UN may be missing even after extraction (e.g. no affiliations in data)
+    if "AU_UN" not in data.columns:
+        return go.FigureWidget(go.Figure()), pd.DataFrame()
+
+    AFF = data["AU_UN"].dropna().apply(lambda x: [aff for aff in x if aff.strip() != ""] if isinstance(x, list) else [s.strip() for s in str(x).split(";") if s.strip()])
     nAFF = [len(aff) for aff in AFF]
 
     affiliations = [aff for sublist in AFF for aff in sublist]
@@ -23,6 +34,10 @@ def get_affiliation_production_over_time(df, top_k_affiliations):
         "Affiliation": affiliations,
         "Year": years
     }).query('Affiliation != "NA"').dropna(subset=["Affiliation", "Year"])
+
+    # PATCH: safety check if AFFY is empty after filtering
+    if AFFY.empty:
+        return go.FigureWidget(go.Figure()), pd.DataFrame()
 
     AFFY = AFFY.groupby(["Affiliation", "Year"]).size().reset_index(name="Articles")
     AFFY = AFFY.pivot(index="Affiliation", columns="Year", values="Articles").fillna(0)
@@ -34,7 +49,10 @@ def get_affiliation_production_over_time(df, top_k_affiliations):
     AffOverTime = AFFY[AFFY["Affiliation"].isin(Affselected["Affiliation"])]
     AffOverTime["Year"] = AffOverTime["Year"].astype(int)
 
-    # Create the plot
+    # PATCH: safety check if AffOverTime is empty
+    if AffOverTime.empty:
+        return go.FigureWidget(go.Figure()), pd.DataFrame()
+
     fig = px.line(
         AffOverTime,
         x="Year",
@@ -43,7 +61,6 @@ def get_affiliation_production_over_time(df, top_k_affiliations):
         labels={"Year": "Year", "Articles": "Cumulative Articles", "Affiliation": "Affiliation"},
     )
 
-    # Customize the layout
     fig.update_layout(
         xaxis=dict(
             tickmode='array',
@@ -67,7 +84,6 @@ def get_affiliation_production_over_time(df, top_k_affiliations):
         )
     )
 
-    # Customize the grid
     fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='#EFEFEF')
     fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='#EFEFEF')
     fig = go.FigureWidget(fig)
