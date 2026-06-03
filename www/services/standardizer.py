@@ -278,6 +278,10 @@ def standardize_openalex(record: dict) -> dict:
     # Step 1: rename simple fields
     result = apply_mapping(record, OPENALEX_MAPPING)
 
+    # TC — manually managed to avoid None → ""
+    tc = record.get("cited_by_count", 0)
+    result["TC"] = int(tc) if tc is not None else 0
+
     # Step 2: handle complex fields
     result.update(parse_openalex_location(record))
     result.update(parse_openalex_authorships(record))

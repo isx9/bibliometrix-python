@@ -50,7 +50,7 @@ OPENALEX_MAPPING = {
     "title":            "TI",
     "publication_year": "PY",
     "language":         "LA",
-    "cited_by_count":   "TC",
+    #"cited_by_count":   "TC",
     "type":             "DT",
 }
 

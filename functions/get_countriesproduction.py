@@ -18,6 +18,8 @@ def get_countries_production(df):
     # Conta le occorrenze dei paesi
     df["AU_CO"] = df["AU_CO"].apply(lambda x: x if isinstance(x, list) else [x])
     df = df.explode("AU_CO")
+    df = df[df["AU_CO"].str.strip() != ""]  # PATCH: filter empty country strings after explode
+
 
     # Funzione per normalizzare i nomi dei paesi
     def clean_country_names(country):

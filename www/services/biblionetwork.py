@@ -1,4 +1,3 @@
-
 from .utils import *
 from .cocmatrix import *
 
@@ -220,14 +219,18 @@ def biblionetwork(
             return NetMatrix
 
         # SAFE DB HANDLING
-        db_name = "web_of_science"
+        # PATCH: default changed from hardcoded "web_of_science" to "" so that
+        # unknown sources don't silently get treated as WoS.
+        db_name = ""
 
         if "DB" in M.columns and not M["DB"].empty:
-            db_name = str(M["DB"].iloc[0])
+            db_name = str(M["DB"].iloc[0]).lower()
 
         print(f"db_name: {db_name}")
 
-        if network == "references" and db_name == "SCOPUS":
+        # PATCH: the Scopus-specific reference filter now checks for "scopus"
+        # (lowercase) to match the normalized db_name above.
+        if network == "references" and db_name == "scopus":
 
             ind = [
                 i for i, col in enumerate(NetMatrix.columns)
@@ -236,9 +239,12 @@ def biblionetwork(
 
             NetMatrix = NetMatrix.iloc[ind, ind]
 
+        # PATCH: shortlabel now supported for openalex and pubmed.
+        # Both use the same label format as WoS (author + year),
+        # so they are routed to the same branch in label_short().
         if network == "references" and shortlabel:
 
-            LABEL = label_short(NetMatrix, db=db_name.lower())
+            LABEL = label_short(NetMatrix, db=db_name)
             LABEL = remove_duplicated_labels(LABEL)
 
             NetMatrix.columns = LABEL
@@ -247,13 +253,15 @@ def biblionetwork(
     return NetMatrix
 
 
-def label_short(NET, db="isi"):
+def label_short(NET, db=""):
 
     LABEL = pd.Series(NET.columns)
 
     YEAR = LABEL.str.extract(r'(\d{4})')[0].fillna("")
 
-    if db == "web_of_science":
+    # PATCH: added "openalex" and "pubmed" to the WoS branch since both
+    # sources produce SR strings in the same "Author, Year, Journal" format.
+    if db in ("web_of_science", "openalex", "pubmed"):
 
         AU = LABEL.str.split(" ").str[:2].str.join(" ")
         LABEL = AU + " " + YEAR
@@ -262,6 +270,8 @@ def label_short(NET, db="isi"):
 
         AU = LABEL.str.split(". ").str[0]
         LABEL = AU + ". " + YEAR
+
+    # For unknown sources, return labels unchanged to avoid crashes.
 
     return LABEL.tolist()
 

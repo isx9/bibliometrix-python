@@ -1,4 +1,5 @@
 "d9k3qp"
+
 from .utils import *
 from .cocmatrix import *
 
@@ -47,8 +48,12 @@ def histNetwork(df, min_citations=0, sep=";", network=True):
         M['PY'] = pd.to_numeric(M['PY'], errors='coerce')
 
     # DATABASE ROUTING
-    if db == "Web_of_Science":
-
+    # PATCH: added OPENALEX and PUBMED to the wos() branch.
+    # Both sources produce SR and DI fields in the format expected by wos(),
+    # so the same matching logic applies. Citation accuracy may be lower for
+    # OpenAlex because CR contains OpenAlex URLs instead of formatted strings,
+    # but the function will not crash.
+    if db in ("Web_of_Science", "OPENALEX", "PUBMED"):
         results = wos(
             M,
             min_citations=min_citations,
@@ -57,7 +62,6 @@ def histNetwork(df, min_citations=0, sep=";", network=True):
         )
 
     elif db == "Scopus":
-
         results = scopus(
             M,
             min_citations=min_citations,
@@ -66,7 +70,7 @@ def histNetwork(df, min_citations=0, sep=";", network=True):
         )
 
     else:
-        print("\nDatabase not compatible with direct citation analysis\n")
+        print(f"\nDatabase '{db}' not recognized. Supported: Web_of_Science, OPENALEX, PUBMED, Scopus\n")
         return None
 
     return results

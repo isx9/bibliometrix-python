@@ -17,6 +17,10 @@ def get_cited_countries(df, num_of_cited_countries, cited_countries_measure):
     df = metaTagExtraction(df, "AU1_CO")
     df = df.get()
 
+    # PATCH: filter rows where AU1_CO is an empty string (common with OpenAlex/PubMed
+    # records that lack affiliation data). dropna alone does not catch empty strings.
+    df = df[df["AU1_CO"].str.strip() != ""]
+
     # Prepare the table for ranking countries
     tab = (
         df.dropna(subset=["AU1_CO"])

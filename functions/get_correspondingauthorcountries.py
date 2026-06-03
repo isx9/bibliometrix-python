@@ -19,6 +19,7 @@ def get_corresponding_author_countries(df, top_k_countries):
 
     # Assicurati che le colonne siano di tipo stringa e rimuovi righe con valori mancanti
     data = data.dropna(subset=["AU1_CO", "AU_CO"])
+    data = data[data["AU1_CO"].str.strip() != ""]  # PATCH: filter empty country strings
     data["AU_CO"] = data["AU_CO"].apply(lambda x: ", ".join(x) if isinstance(x, list) else str(x))
     data["AU"] = data["AU"].apply(lambda x: ", ".join(x) if isinstance(x, list) else str(x))
 

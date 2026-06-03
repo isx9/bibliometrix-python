@@ -13,6 +13,9 @@ def get_filters(df):
         A DataFrame with additional columns for filters and metrics.
     """
     data = df.get()
+    data["PY"] = pd.to_numeric(data["PY"], errors="coerce").fillna(0).astype(int)  # PATCH: ensure PY is numeric
+    data["TC"] = pd.to_numeric(data["TC"], errors="coerce").fillna(0).astype(int)  # PATCH: ensure TC is numeric
+
 
     # Calculate the minimum and maximum publication years
     data["Min_Year"] = data["PY"].min()

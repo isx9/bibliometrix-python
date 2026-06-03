@@ -19,6 +19,10 @@ def get_references_spectroscopy(df, start_year, end_year=2005, field_separator_s
     """
 
     df = df.get()
+    # PATCH: if CR contains lists (as produced by the ETL pipeline),
+    # join them into semicolon-separated strings before processing.
+    df['CR'] = df['CR'].apply(
+    lambda x: field_separator_spec.join(x) if isinstance(x, list) else (x or ""))
 
     # ---------------- SAFE CR PATCH ----------------
     c_references = df['CR'].fillna("").astype(str)
