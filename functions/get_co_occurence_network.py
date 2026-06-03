@@ -24,15 +24,16 @@ def get_co_occurence_network(df, field_cn, ngram, network_layout, clustering_alg
                     syn_dict[key] = terms[1:]
             synonyms = syn_dict if syn_dict else None
 
-    # Set ngrams based on field_cn
     ngrams = int(ngram) if field_cn in ['TI', 'AB'] else 1
 
-    # Adjust number of labels if exceeds nodes
     if num_of_labels > num_of_nodes:
         num_of_labels = num_of_nodes
 
     network_data = None
     title = ""
+
+    # PATCH: extract plain DataFrame once for use with term_extraction
+    M_plain = M.get() if hasattr(M, 'get') and callable(M.get) and not isinstance(M, pd.DataFrame) else M
 
     if field_cn == 'ID':
         network_data = biblionetwork(M, "co-occurrences", "keywords", num_of_nodes,
@@ -43,12 +44,14 @@ def get_co_occurence_network(df, field_cn, ngram, network_layout, clustering_alg
                                     sep=";", remove_terms=remove_terms, synonyms=synonyms)
         title = "Authors' Keywords network"
     elif field_cn == 'TI':
-        M = term_extraction(M, "TI", ngrams=ngrams,
+        # PATCH: pass plain DataFrame to term_extraction — it does not accept reactives
+        M = term_extraction(M_plain, "TI", ngrams=ngrams,
                           remove_terms=remove_terms, synonyms=synonyms)
         network_data = biblionetwork(M, "co-occurrences", "titles", num_of_nodes, sep=";")
         title = "Title Words network"
     elif field_cn == 'AB':
-        M = term_extraction(M, "AB", ngrams=ngrams,
+        # PATCH: pass plain DataFrame to term_extraction — it does not accept reactives
+        M = term_extraction(M_plain, "AB", ngrams=ngrams,
                           remove_terms=remove_terms, synonyms=synonyms)
         network_data = biblionetwork(M, "co-occurrences", "abstracts", num_of_nodes, sep=";")
         title = "Abstract Words network"
@@ -57,7 +60,11 @@ def get_co_occurence_network(df, field_cn, ngram, network_layout, clustering_alg
         network_data = np.matmul(wsc.T, wsc)
         title = "Subject Categories network"
 
+    # PATCH: return early if network_data is None or empty
     if network_data is None:
+        return None, None, None, None
+
+    if isinstance(network_data, pd.DataFrame) and network_data.empty:
         return None, None, None, None
 
     if normalization_cn == "none":
@@ -87,6 +94,10 @@ def get_co_occurence_network(df, field_cn, ngram, network_layout, clustering_alg
         verbose=False
     )
 
+    # PATCH: cocnet may be None if network_plot fails on small/empty graphs
+    if cocnet is None:
+        return None, None, None, None
+
     if color_by_year:
         Y = field_by_year(M, field_cn)
         g = cocnet['graph']
@@ -94,20 +105,16 @@ def get_co_occurence_network(df, field_cn, ngram, network_layout, clustering_alg
         Y_df = Y['df']
 
         mask = Y_df['item'].str.lower().isin(labels)
-        df = Y_df[mask].copy()
+        df_year = Y_df[mask].copy()
 
-        year_range = df['year_med'].max() - df['year_med'].min() + 1
+        year_range = df_year['year_med'].max() - df_year['year_med'].min() + 1 if not df_year.empty else 1
         colors = plt.cm.Blues(np.linspace(0, 1, int(year_range * 10)))
 
-        # PATCH 1: if a label is not found in df, the filtered DataFrame is
-        # empty and .iloc[0] raises IndexError.
-        # → use a safe lookup with a fallback to the median year when the
-        # label is not present in the year data.
-        median_year = df['year_med'].median() if not df.empty else 0
-        max_year = df['year_med'].max() if not df.empty else 0
+        median_year = df_year['year_med'].median() if not df_year.empty else 0
+        max_year = df_year['year_med'].max() if not df_year.empty else 0
 
         def safe_year_lookup(label):
-            matches = df[df['item'].str.lower() == label.lower()]['year_med']
+            matches = df_year[df_year['item'].str.lower() == label.lower()]['year_med']
             return matches.iloc[0] if not matches.empty else median_year
 
         vertex_colors = []
@@ -134,12 +141,8 @@ def get_co_occurence_network(df, field_cn, ngram, network_layout, clustering_alg
         cluster_colors[cluster_id] = f"rgba({r},{g},{b},{node_opacity})"
 
     layout = cocnet['graph']['layout']
-    print("Layout:", layout)
     coords = np.array([[pos[0], pos[1]] for pos in layout])
 
-    # PATCH 3: if all coordinates are zero, np.abs(coords).max() is 0 and
-    # the division produces NaN everywhere, making all node positions invalid.
-    # → only normalize if the max absolute value is non-zero.
     abs_max = np.abs(coords).max()
     if abs_max > 0:
         coords = coords / abs_max
@@ -155,9 +158,14 @@ def get_co_occurence_network(df, field_cn, ngram, network_layout, clustering_alg
         cluster_id = cocnet['cluster_obj'].membership[vertex.index]
         node_color = cluster_colors[cluster_id]
 
-        min_deg, max_deg = min(cocnet['graph'].degree()), max(cocnet['graph'].degree())
-        node_size = 10 if max_deg == min_deg else (15 * (vertex.degree() - min_deg) / (max_deg - min_deg) + 10)
-        node_size = max(10, min(130, node_size))
+        degrees = cocnet['graph'].degree()
+        if not degrees:
+            node_size = 10
+        else:
+            min_deg, max_deg = min(degrees), max(degrees)
+            node_size = 10 if max_deg == min_deg else (15 * (vertex.degree() - min_deg) / (max_deg - min_deg) + 10)
+            node_size = max(10, min(130, node_size))
+
         font_size = node_size * 2
         node_sizes.append(node_size)
 
@@ -262,7 +270,6 @@ def get_co_occurence_network(df, field_cn, ngram, network_layout, clustering_alg
         updated_html = updated_html.replace("1px solid lightgray", "none")
         f.write(updated_html)
 
-    # Density plot
     nodes_df_orig = pd.DataFrame(nodes)
     nodes_df_orig['y'] = nodes_df_orig['y'] * -1
 
@@ -270,9 +277,6 @@ def get_co_occurence_network(df, field_cn, ngram, network_layout, clustering_alg
     min_font = font_sizes.min()
     max_font = font_sizes.max()
 
-    # PATCH 2: if all nodes have the same font size, max_font - min_font is 0
-    # and the normalization produces NaN everywhere.
-    # → fall back to a constant mid-range size when all font sizes are equal.
     font_range = max_font - min_font
     if font_range > 0:
         nodes_df_orig['font_size'] = ((font_sizes - min_font) / font_range * 20) + 10
@@ -357,7 +361,7 @@ def get_co_occurence_network(df, field_cn, ngram, network_layout, clustering_alg
     node_degrees = node_degrees.sort_values('degree', ascending=False)
     node_degrees['x'] = range(1, len(node_degrees) + 1)
     max_degree = node_degrees['degree'].max()
-    node_degrees['degree'] = node_degrees['degree'] / max_degree
+    node_degrees['degree'] = node_degrees['degree'] / max_degree if max_degree > 0 else 0
 
     degree_plot = go.Figure()
     degree_plot.add_trace(go.Scatter(
@@ -403,37 +407,24 @@ def get_co_occurence_network(df, field_cn, ngram, network_layout, clustering_alg
 
 def field_by_year(df, field_cn, timespan=None, min_freq=2, n_items=5, remove_terms=None, synonyms=None):
     """
-    Analyzes field frequency by year, matching R's fieldByYear function.
-
-    Parameters:
-    -----------
-    df : DataFrame
-        The bibliographic data.
-    field_cn : str
-        The field to analyze ('ID', 'DE', 'TI', 'AB', 'WC').
-    timespan : list or None
-        Optional [start_year, end_year] filter.
-    min_freq : int
-        Minimum frequency threshold.
-    n_items : int
-        Maximum number of items per year.
-    remove_terms : list or None
-        Terms to remove.
-    synonyms : dict or None
-        Synonym mappings.
+    Analyzes field frequency by year.
     """
-    # PATCH 4: df.get() is not a standard pandas method — it was a custom method
-    # of a wrapper object that has since been removed. Using df.copy() to work
-    # on a copy and avoid mutating the original DataFrame passed by the caller.
-    M = df.copy()
+    # PATCH: df may be a Shiny reactive Value or a plain DataFrame
+    M = df.get() if hasattr(df, 'get') and callable(df.get) and not isinstance(df, pd.DataFrame) else df
+    M = M.copy()
 
     A = cocMatrix(df, field_cn, binary=False, remove_terms=remove_terms, synonyms=synonyms)
+
+    # PATCH: cocMatrix may return None if field is empty
+    if A is None or A.empty:
+        empty = pd.DataFrame()
+        return {'df': empty, 'df_graph': empty}
+
     n = np.sum(A, axis=0)
 
-    trend_med = []
     years = M['PY'].values
-    print("Years:", years)
 
+    trend_med = []
     for col_idx in range(A.shape[1]):
         term_years = np.repeat(years, A.iloc[:, col_idx].astype(int))
         if len(term_years) > 0:
@@ -448,10 +439,6 @@ def field_by_year(df, field_cn, timespan=None, min_freq=2, n_items=5, remove_ter
 
     trend_med = pd.DataFrame(trend_med)
 
-    # PATCH 5: if trend_med is empty (no terms with sufficient data), .min()
-    # and .max() return NaN and the subsequent query filter silently drops all
-    # rows instead of raising an error.
-    # → return early with empty DataFrames instead of producing silent NaN.
     if trend_med.empty:
         return {'df': trend_med, 'df_graph': trend_med}
 

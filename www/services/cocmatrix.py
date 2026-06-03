@@ -16,7 +16,8 @@ def cocMatrix(
     Computes occurrences between elements of a Tag Field from a bibliographic data frame.
     """
 
-    M = df.get()
+    # PATCH: df may be a Shiny reactive Value or a plain DataFrame
+    M = df.get() if hasattr(df, 'get') and callable(df.get) and not isinstance(df, pd.DataFrame) else df
 
     # SAFETY CHECK
     if M is None or M.empty:

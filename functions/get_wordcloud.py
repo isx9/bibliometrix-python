@@ -58,17 +58,12 @@ def get_wordcloud(df, ngram, num_of_words_wc, field_wc, file_upload_terms_wc, fi
     word_frequencies = dict(zip(word_counts["Words"], word_counts["Occurrences"]))
     G = nx.Graph()
 
-    # PATCH 7: if no CSS4 color passes the legibility filter, random.choice([])
-    # would crash with IndexError. Added a fallback to a safe default color list.
     colors = [c for c in mcolors.CSS4_COLORS.values() if is_legible_on_white(c)]
     if not colors:
         colors = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd"]
 
     sorted_words = sorted(word_frequencies.items(), key=lambda x: x[1], reverse=True)
 
-    # PATCH 6: if word_frequencies is empty (e.g. all terms filtered out),
-    # sorted_words is an empty list and sorted_words[0] raises IndexError.
-    # → return an empty HTML file and the empty table instead of crashing.
     if not sorted_words:
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".html")
         with open(tmp.name, 'w', encoding="utf-8") as f:
@@ -92,7 +87,6 @@ def get_wordcloud(df, ngram, num_of_words_wc, field_wc, file_upload_terms_wc, fi
                    font={"size": font_size, "color": color, "strokeWidth": 1, "face": "Arial"},
                    x=pos_x, y=pos_y)
 
-    # Build interactive network with Pyvis
     g = Network(width="100%", height="98vh", bgcolor="white", font_color="black")
     g.from_nx(G)
 
@@ -109,7 +103,6 @@ def get_wordcloud(df, ngram, num_of_words_wc, field_wc, file_upload_terms_wc, fi
     g.force_atlas_2based(gravity=-30, central_gravity=0.01, spring_length=60,
                          spring_strength=0.08, damping=0.9)
 
-    # Save the HTML file
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".html")
     html_path = tmp.name
     with open(html_path, 'w', encoding="utf-8") as f:
@@ -126,19 +119,18 @@ def table_tag(df, tag, ngrams=1, remove_terms=None, synonyms=None):
     """
     Extract and count words from a specified field in the DataFrame.
     """
-    # PATCH 1: df.get() is not a standard pandas method — it was a custom method
-    # of a wrapper object that has since been removed. Using df.copy() to work on
-    # a copy and avoid mutating the original DataFrame passed by the caller.
-    M = df.copy()
+    # PATCH: df may be a Shiny reactive Value or a plain DataFrame
+    M = df.get() if hasattr(df, 'get') and callable(df.get) and not isinstance(df, pd.DataFrame) else df
+    M = M.copy()
 
     # Remove duplicates
     M = M.drop_duplicates(subset='SR')
 
     # Get text data based on tag
     if tag in ['AB', 'TI']:
-        # PATCH 2: term_extraction returns a pandas DataFrame which does not have
-        # a .get() method. Removed .get() and used the result directly.
-        text_data = term_extraction(df, field=tag, stemming=False, verbose=False,
+        # PATCH: pass plain DataFrame to term_extraction — it does not accept reactives
+        df_plain = df.get() if hasattr(df, 'get') and callable(df.get) and not isinstance(df, pd.DataFrame) else df
+        text_data = term_extraction(df_plain, field=tag, stemming=False, verbose=False,
                                     ngrams=ngrams, remove_terms=remove_terms, synonyms=synonyms)
         text_data = text_data[f"{tag}_TM"]
     else:
@@ -146,10 +138,6 @@ def table_tag(df, tag, ngrams=1, remove_terms=None, synonyms=None):
 
     # Handle list columns (DE and ID)
     if tag in ['DE', 'ID']:
-        # PATCH 3: the original code used eval(x) on strings coming from external
-        # files, which is unsafe and crashes if the string is not a valid Python
-        # list. Replaced with ast.literal_eval inside a try/except to handle
-        # malformed strings without crashing.
         def safe_parse(x):
             if isinstance(x, list):
                 return x
@@ -165,10 +153,7 @@ def table_tag(df, tag, ngrams=1, remove_terms=None, synonyms=None):
         words = text_data.dropna().astype(str).str.cat(sep=', ').upper()
         words = [word.strip() for word in words.split(',') if word and word.strip()]
     else:
-        # PATCH 4: iterating over text_data without type checking — if an element
-        # is None or a string instead of a list, it crashes with
-        # TypeError: 'NoneType' object is not iterable.
-        # → filter only list elements before iterating.
+        # PATCH: filter only list elements before iterating to avoid TypeError
         words = [
             item
             for sublist in text_data
@@ -184,10 +169,7 @@ def table_tag(df, tag, ngrams=1, remove_terms=None, synonyms=None):
     # Count words
     word_counts = Counter(words)
 
-    # PATCH 5: the remove_terms filter was conditioned on tag in ['DE', 'ID'],
-    # so for TI and AB the terms to remove were passed to term_extraction but
-    # never filtered on the final word_counts — effectively being ignored.
-    # → removed the condition: remove_terms is now applied to all tags.
+    # PATCH: apply remove_terms to all tags
     if remove_terms:
         word_counts = {
             word: count for word, count in word_counts.items()

@@ -58,11 +58,6 @@ def get_frequent_words(df, ngram, num_of_words, word_type, file_upload_terms, fi
         color_continuous_scale=[(0, "lightblue"), (1, "darkblue")]
     )
 
-    # PATCH 1: originale passava l'intera Series word_counts["Occurrences"] a
-    # marker.size in update_traces, sovrascrivendo size_max=60 già impostato in
-    # px.scatter e producendo marker fuori scala.
-    # → rimosso size da update_traces; px.scatter gestisce già la dimensione
-    # tramite size="Occurrences" e size_max=60.
     fig.update_traces(
         marker=dict(opacity=1),
         textposition="middle center",
@@ -106,19 +101,20 @@ def table_tag(df, tag, ngrams=1, remove_terms=None, synonyms=None):
     """
     Extract and count words from a specified field in the DataFrame.
     """
-    # PATCH 2: df.get() non è un metodo pandas standard — era un metodo custom
-    # di un oggetto wrapper ora rimosso. Usiamo df.copy() per lavorare su una
-    # copia e non modificare il DataFrame originale passato dal chiamante.
-    M = df.copy()
+    # PATCH: df may be a Shiny reactive Value or a plain DataFrame.
+    # .get() extracts the DataFrame from the reactive wrapper;
+    # for plain DataFrames it falls through to the else branch.
+    M = df.get() if hasattr(df, 'get') and callable(df.get) and not isinstance(df, pd.DataFrame) else df
+    M = M.copy()
 
     # Remove duplicates
     M = M.drop_duplicates(subset='SR')
 
     # Get text data based on tag
     if tag in ['AB', 'TI']:
-        # PATCH 3: term_extraction restituisce un DataFrame pandas — non ha il
-        # metodo .get(). Rimosso .get() e usato direttamente il risultato.
-        text_data = term_extraction(df, field=tag, stemming=False, verbose=False,
+        # PATCH: pass plain DataFrame to term_extraction — it does not accept reactives
+        df_plain = df.get() if hasattr(df, 'get') and callable(df.get) and not isinstance(df, pd.DataFrame) else df
+        text_data = term_extraction(df_plain, field=tag, stemming=False, verbose=False,
                                     ngrams=ngrams, remove_terms=remove_terms, synonyms=synonyms)
         text_data = text_data[f"{tag}_TM"]
     else:
@@ -126,10 +122,7 @@ def table_tag(df, tag, ngrams=1, remove_terms=None, synonyms=None):
 
     # Handle list columns (DE and ID)
     if tag in ['DE', 'ID']:
-        # PATCH 4: eval(x) su stringhe provenienti da file esterni è pericoloso
-        # e crasha se la stringa non è una lista Python valida.
-        # → sostituito con ast.literal_eval dentro try/except per gestire
-        # stringhe malformate senza crash.
+        # PATCH: safe parser replaces eval() to handle malformed strings without crash
         def safe_parse(x):
             if isinstance(x, list):
                 return x
@@ -145,10 +138,7 @@ def table_tag(df, tag, ngrams=1, remove_terms=None, synonyms=None):
         words = text_data.dropna().astype(str).str.cat(sep=', ').upper()
         words = [word.strip() for word in words.split(',') if word and word.strip()]
     else:
-        # PATCH 5: iterazione su text_data senza controllo del tipo — se un
-        # elemento è None o una stringa invece di una lista crasha con
-        # TypeError: 'NoneType' object is not iterable.
-        # → filtriamo solo gli elementi che sono liste prima di iterare.
+        # PATCH: filter only list elements before iterating to avoid TypeError on None or str
         words = [
             item
             for sublist in text_data
@@ -164,10 +154,7 @@ def table_tag(df, tag, ngrams=1, remove_terms=None, synonyms=None):
     # Count words
     word_counts = Counter(words)
 
-    # PATCH 6: il filtro remove_terms era condizionato a tag in ['DE', 'ID'],
-    # quindi per TI e AB i termini da rimuovere venivano passati a term_extraction
-    # ma non filtrati sul word_counts finale — risultando di fatto ignorati.
-    # → rimossa la condizione: remove_terms viene ora applicato a tutti i tag.
+    # PATCH: apply remove_terms to all tags, not just DE and ID
     if remove_terms:
         word_counts = {
             word: count for word, count in word_counts.items()

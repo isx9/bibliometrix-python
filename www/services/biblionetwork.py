@@ -212,7 +212,8 @@ def biblionetwork(
 
         NetMatrix = NetMatrix.loc[filtered_index, filtered_columns]
 
-        M = M.get()
+        # PATCH: M may already be a plain DataFrame after term_extraction
+        M = M.get() if hasattr(M, 'get') and callable(M.get) and not isinstance(M, pd.DataFrame) else M
 
         # SAFETY CHECK
         if M is None or M.empty:

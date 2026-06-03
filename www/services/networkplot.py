@@ -25,41 +25,62 @@ def network_plot(NetMatrix, normalize=None, n=None, degree=None, Title="Plot", t
 
     # Compute node degrees
     deg = np.array(bsk_network.degree())
-    bsk_network.vs["deg"] = deg
+
+    # PATCH: if graph has no nodes, return None immediately
+    if len(bsk_network.vs) == 0 or len(deg) == 0:
+        return None
+
+    # Assign deg attribute to vertices
+    bsk_network.vs["deg"] = deg.tolist()
 
     # Node sizes
     if size_cex:
-        bsk_network.vs["size"] = (deg / max(deg)) * size
+        max_deg = max(deg) if max(deg) > 0 else 1
+        bsk_network.vs["size"] = (deg / max_deg * size).tolist()
     else:
         bsk_network.vs["size"] = [size] * len(bsk_network.vs)
 
     # Label sizes
     if label_cex:
-        lsize = np.log(1 + (deg / max(deg))) * labelsize
-        lsize[lsize < 0.5] = 0.5  # Minimum label size is fixed to 0.5
-        bsk_network.vs["label_size"] = lsize
+        max_deg = max(deg) if max(deg) > 0 else 1
+        lsize = np.log(1 + (deg / max_deg)) * labelsize
+        lsize[lsize < 0.5] = 0.5
+        bsk_network.vs["label_size"] = lsize.tolist()
     else:
-        bsk_network.vs["label_size"] = labelsize
+        bsk_network.vs["label_size"] = [labelsize] * len(bsk_network.vs)
 
     # Filter vertices based on degree or number
     if degree is not None:
+        deg = np.array(bsk_network.degree())
         Deg = deg - np.diag(NetMatrix)
         Vind = Deg < degree
         if np.sum(~Vind) == 0:
             print("\ndegree argument is too high!\n\n")
-            return
+            return None
         indices_to_delete = np.where(Vind)[0]
         bsk_network.delete_vertices(indices_to_delete)
         if bsk_S is not None:
             bsk_S.delete_vertices(indices_to_delete)
+        # PATCH: recompute deg after filtering
+        deg = np.array(bsk_network.degree())
+        bsk_network.vs["deg"] = deg.tolist()
+
     elif n is not None:
-        if n > NetMatrix.shape[0]:
-            n = NetMatrix.shape[0]
+        deg = np.array(bsk_network.degree())
+        if n > len(deg):
+            n = len(deg)
         nodes = np.argsort(deg)[-n:]
         indices_to_delete = np.setdiff1d(np.arange(len(deg)), nodes)
         bsk_network.delete_vertices(indices_to_delete)
         if bsk_S is not None:
             bsk_S.delete_vertices(indices_to_delete)
+        # PATCH: recompute deg after filtering
+        deg = np.array(bsk_network.degree())
+        bsk_network.vs["deg"] = deg.tolist()
+
+    # PATCH: check again after filtering
+    if len(bsk_network.vs) == 0:
+        return None
 
     # Simplify the graph
     if edges_min > 1:
@@ -70,19 +91,24 @@ def network_plot(NetMatrix, normalize=None, n=None, degree=None, Title="Plot", t
 
     # Process edge weights
     if "weight" not in bsk_network.es.attributes():
-        bsk_network.es["weight"] = bsk_network.es["width"] = 1
+        bsk_network.es["weight"] = [1] * len(bsk_network.es)
+        bsk_network.es["width"] = [1] * len(bsk_network.es)
 
     if weighted:
         weights = np.array(bsk_network.es["weight"])
-        normalized_weights = (weights - weights.min()) / (weights.max() - weights.min())
-        bsk_network.es["width"] = normalized_weights * edgesize
+        if len(weights) > 0 and weights.max() != weights.min():
+            normalized_weights = (weights - weights.min()) / (weights.max() - weights.min())
+        else:
+            normalized_weights = np.ones(len(weights))
+        bsk_network.es["width"] = (normalized_weights * edgesize).tolist()
     else:
         if remove_multiple:
-            bsk_network.es["width"] = edgesize
+            bsk_network.es["width"] = [edgesize] * len(bsk_network.es)
         else:
             edges = np.array(bsk_network.es["weight"])
-            normalized_edges = edges / max(edges)
-            bsk_network.es["width"] = normalized_edges * edgesize
+            max_edge = max(edges) if len(edges) > 0 and max(edges) > 0 else 1
+            normalized_edges = edges / max_edge
+            bsk_network.es["width"] = (normalized_edges * edgesize).tolist()
 
     # Remove edges below threshold
     if edges_min > 0:
@@ -98,11 +124,18 @@ def network_plot(NetMatrix, normalize=None, n=None, degree=None, Title="Plot", t
         if bsk_S is not None:
             isolates_to_remove = [v.index for v in bsk_S.vs if v["name"] not in bsk_network.vs["name"]]
             bsk_S.delete_vertices(isolates_to_remove)
+        # PATCH: recompute deg after removing isolates
+        deg = np.array(bsk_network.degree())
+        bsk_network.vs["deg"] = deg.tolist()
+
+    # PATCH: check again after removing isolates
+    if len(bsk_network.vs) == 0:
+        return None
 
     # Apply clustering
     cl = clustering_network(bsk_network, cluster)
-
     bsk_network = cl["bsk_network"]
+
     if bsk_S is not None:
         bsk_S.vs["color"] = bsk_network.vs["color"]
         bsk_S.vs["community"] = bsk_network.vs["community"]
@@ -122,20 +155,23 @@ def network_plot(NetMatrix, normalize=None, n=None, degree=None, Title="Plot", t
     if label:
         LABEL = list(bsk_network.vs["name"])
         if label_n is not None:
-            q = 1 - (label_n / len(bsk_network.vs["deg"]))
+            # PATCH: safely get deg attribute
+            deg_vals = bsk_network.vs["deg"] if "deg" in bsk_network.vs.attributes() else bsk_network.degree()
+            q = 1 - (label_n / len(deg_vals)) if len(deg_vals) > 0 else 1
             if q <= 0:
-                bsk_network.vs["label_size"] = 10
+                bsk_network.vs["label_size"] = [10] * len(bsk_network.vs)
             else:
                 if q > 1:
                     q = 1
-                q = np.quantile(bsk_network.vs["deg"], q)
-                for i, deg_val in enumerate(bsk_network.vs["deg"]):
+                q = np.quantile(deg_vals, q)
+                for i, deg_val in enumerate(deg_vals):
                     if deg_val < q:
                         LABEL[i] = ""
-                bsk_network.vs["label_size"] = 10
-                for i, deg_val in enumerate(bsk_network.vs["deg"]):
+                label_sizes = [10] * len(bsk_network.vs)
+                for i, deg_val in enumerate(deg_vals):
                     if deg_val < q:
-                        bsk_network.vs["label_size"][i] = 0
+                        label_sizes[i] = 0
+                bsk_network.vs["label_size"] = label_sizes
 
     if label_color:
         lab_color = bsk_network.vs["color"]
@@ -150,12 +186,12 @@ def network_plot(NetMatrix, normalize=None, n=None, degree=None, Title="Plot", t
     bsk_network["asp"] = 0
     bsk_network["layout"] = l
     bsk_network["main"] = Title
-    bsk_network.es["curved"] = curved
-    bsk_network.vs["label_dist"] = 0.7
+    bsk_network.es["curved"] = [curved] * len(bsk_network.es)
+    bsk_network.vs["label_dist"] = [0.7] * len(bsk_network.vs)
     bsk_network.vs["frame_color"] = adjust_color('black', alpha)
     bsk_network.vs["color"] = [adjust_color(c, alpha) for c in bsk_network.vs["color"]]
     bsk_network.vs["label_color"] = adjust_color('black', min(1, alpha + 0.1))
-    bsk_network.vs["label_font"] = 2
+    bsk_network.vs["label_font"] = [2] * len(bsk_network.vs)
     bsk_network.vs["label"] = LABEL
 
     # Plot the network
@@ -195,49 +231,55 @@ def delete_isolates(graph, mode='all'):
 
 
 def clustering_network(bsk_network, cluster):
-    # Determina i colori disponibili
     colorlist = color_list()
 
-    # Determina il clustering in base al metodo specificato
-    if cluster == "none":
-        net_groups = {"membership": [1] * len(bsk_network.vs)}
-    elif cluster == "optimal":
-        net_groups = bsk_network.community_optimal_modularity()
-    elif cluster == "leiden":
-        net_groups = bsk_network.community_leiden(objective_function="modularity", n_iterations=3, resolution_parameter=0.75)
-    elif cluster == "louvain":
-        net_groups = bsk_network.community_multilevel()
-    elif cluster == "fast_greedy":
-        net_groups = bsk_network.community_fastgreedy().as_clustering()
-    elif cluster == "leading_eigen":
-        net_groups = bsk_network.community_leading_eigenvector()
-    elif cluster == "spinglass":
-        net_groups = bsk_network.community_spinglass()
-    elif cluster == "infomap":
-        net_groups = bsk_network.community_infomap()
-    elif cluster == "edge_betweenness":
-        net_groups = bsk_network.community_edge_betweenness().as_clustering()
-    elif cluster == "walktrap":
-        net_groups = bsk_network.community_walktrap().as_clustering()
-    else:
-        print("\nUnknown cluster argument. Using default algorithm\n")
-        net_groups = bsk_network.community_walktrap().as_clustering()
+    # PATCH: wrap clustering in try/except — some algorithms fail on small or
+    # disconnected graphs. Fall back to single-cluster assignment on failure.
+    try:
+        if cluster == "none":
+            net_groups = type('FallbackClustering', (), {'membership': [0] * len(bsk_network.vs)})()
+        elif cluster == "optimal":
+            net_groups = bsk_network.community_optimal_modularity()
+        elif cluster == "leiden":
+            net_groups = bsk_network.community_leiden(objective_function="modularity", n_iterations=3, resolution_parameter=0.75)
+        elif cluster == "louvain":
+            net_groups = bsk_network.community_multilevel()
+        elif cluster == "fast_greedy":
+            net_groups = bsk_network.community_fastgreedy().as_clustering()
+        elif cluster == "leading_eigen":
+            net_groups = bsk_network.community_leading_eigenvector()
+        elif cluster == "spinglass":
+            net_groups = bsk_network.community_spinglass()
+        elif cluster == "infomap":
+            net_groups = bsk_network.community_infomap()
+        elif cluster == "edge_betweenness":
+            net_groups = bsk_network.community_edge_betweenness().as_clustering()
+        elif cluster == "walktrap":
+            net_groups = bsk_network.community_walktrap().as_clustering()
+        else:
+            print("\nUnknown cluster argument. Using default algorithm\n")
+            net_groups = bsk_network.community_walktrap().as_clustering()
+    except Exception as e:
+        print(f"Clustering failed ({e}), falling back to single cluster.")
+        net_groups = type('FallbackClustering', (), {'membership': [0] * len(bsk_network.vs)})()
 
-    # Assegna il cluster a ogni nodo
     bsk_network.vs["community"] = net_groups.membership
 
-    # Converte la lista di colori RGBA in esadecimale
     colorlist_hex = [rgba_to_hex(c) for c in colorlist]
 
-    # Assegna colori ai nodi e agli archi (ora in formato esadecimale)
     bsk_network.vs["color"] = [colorlist_hex[m % len(colorlist)] for m in net_groups.membership]
     el = np.array(bsk_network.get_edgelist())
-    bsk_network.es["color"] = [
-        "#B3B3B3" if bsk_network.vs[el[i, 0]]["community"] != bsk_network.vs[el[i, 1]]["community"]
-        else colorlist_hex[bsk_network.vs[el[i, 0]]["community"] % len(colorlist)]
-        for i in range(len(el))
-    ]
-    bsk_network.es["lty"] = [5 if c == "#B3B3B3" else 1 for c in bsk_network.es["color"]]
+
+    if len(el) > 0:
+        bsk_network.es["color"] = [
+            "#B3B3B3" if bsk_network.vs[el[i, 0]]["community"] != bsk_network.vs[el[i, 1]]["community"]
+            else colorlist_hex[bsk_network.vs[el[i, 0]]["community"] % len(colorlist)]
+            for i in range(len(el))
+        ]
+        bsk_network.es["lty"] = [5 if c == "#B3B3B3" else 1 for c in bsk_network.es["color"]]
+    else:
+        bsk_network.es["color"] = []
+        bsk_network.es["lty"] = []
 
     return {"bsk_network": bsk_network, "net_groups": net_groups}
 
@@ -248,18 +290,18 @@ def switch_layout(bsk_network, type, community_repulsion):
         row = np.array(bsk_network.get_edgelist())
         membership = bsk_network.vs["community"]
 
-        if bsk_network.es["weight"] is None:
-            bsk_network.es["weight"] = [
-                weight_community(row[i], membership, community_repulsion, 1)
-                for i in range(len(row))
-            ]
-        else:
-            bsk_network.es["weight"] = [
-                bsk_network.es["weight"][i] + weight_community(row[i], membership, community_repulsion, 1)
-                for i in range(len(row))
-            ]
+        if len(row) > 0:
+            if bsk_network.es["weight"] is None:
+                bsk_network.es["weight"] = [
+                    weight_community(row[i], membership, community_repulsion, 1)
+                    for i in range(len(row))
+                ]
+            else:
+                bsk_network.es["weight"] = [
+                    bsk_network.es["weight"][i] + weight_community(row[i], membership, community_repulsion, 1)
+                    for i in range(len(row))
+                ]
 
-    # Determina il layout
     if type == "auto":
         l = bsk_network.layout_auto()
     elif type == "circle":
@@ -277,11 +319,13 @@ def switch_layout(bsk_network, type, community_repulsion):
     else:
         l = bsk_network.layout_auto()
 
-    # Normalizza manualmente il layout
+    # PATCH: avoid division by zero when all coordinates are identical
     l_coords = np.array(l.coords)
     min_coords = l_coords.min(axis=0)
     max_coords = l_coords.max(axis=0)
-    normalized_coords = (l_coords - min_coords) / (max_coords - min_coords)
+    range_coords = max_coords - min_coords
+    range_coords[range_coords == 0] = 1
+    normalized_coords = (l_coords - min_coords) / range_coords
     l = ig.Layout(normalized_coords.tolist())
 
     return {"l": l, "bsk_network": bsk_network}

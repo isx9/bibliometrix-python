@@ -38,10 +38,11 @@ def get_word_frequency(df, ngram, field_wf, file_upload_terms_wf, file_upload_sy
     # Set ngrams based on field_wf
     ngrams = int(ngram) if field_wf in ['TI', 'AB'] else 1
 
-    # PATCH 1: term_extraction returns a pandas DataFrame which does not have
-    # a .get() method. Removed .get() and used the result directly.
-    data = term_extraction(df, field=field_wf, stemming=False, verbose=False,
-                           ngrams=ngrams, remove_terms=remove_terms, synonyms=synonyms)
+    
+    # PATCH: extract plain DataFrame before passing to term_extraction
+    df_plain = df.get() if hasattr(df, 'get') and callable(df.get) and not isinstance(df, pd.DataFrame) else df
+    data = term_extraction(df_plain, field=field_wf, stemming=False, verbose=False,
+                        ngrams=ngrams, remove_terms=remove_terms, synonyms=synonyms)
     if field_wf == 'TI':
         print(data[f"{field_wf}_TM"])
 

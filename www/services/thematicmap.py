@@ -6,18 +6,18 @@ from .biblionetwork import *
 
 def thematic_map(df, field="ID", n=250, minfreq=5, ngrams=1, stemming=False, size=0.5, n_labels=1, community_repulsion=0.1, repel=True, remove_terms=None, synonyms=None, cluster="walktrap", subgraphs=False):
 
+    # PATCH: df may be a Shiny reactive Value or a plain DataFrame
     M = df
-
-    # PATCH 1: df.get() is not a standard pandas method — it was a custom method
-    # of a wrapper object that has since been removed. Using df.copy() to work on
-    # a copy and avoid mutating the original DataFrame passed by the caller.
-    m = df.copy()
+    m = df.get() if hasattr(df, 'get') and callable(df.get) and not isinstance(df, pd.DataFrame) else df
+    m = m.copy()
 
     # Set ngrams based on field
     ngrams = int(ngrams) if field in ['TI', 'AB'] else 1
-    # Set stemming as boolean
     stemming = True if stemming == "Yes" else False
     minfreq = max(0, int(minfreq * len(m) // 1000))
+
+    # PATCH: extract plain DataFrame for term_extraction calls
+    M_plain = df.get() if hasattr(df, 'get') and callable(df.get) and not isinstance(df, pd.DataFrame) else df
 
     # Preprocess field and create network matrix
     if field == "ID":
@@ -25,19 +25,16 @@ def thematic_map(df, field="ID", n=250, minfreq=5, ngrams=1, stemming=False, siz
     elif field == "DE":
         NetMatrix = biblionetwork(M, analysis="co-occurrences", network="author_keywords", n=n, sep=";", remove_terms=remove_terms, synonyms=synonyms)
     elif field == "TI":
-        M = term_extraction(M, field="TI", ngrams=ngrams, verbose=False, stemming=stemming, remove_terms=remove_terms, synonyms=synonyms)
+        # PATCH: pass plain DataFrame to term_extraction
+        M = term_extraction(M_plain, field="TI", ngrams=ngrams, verbose=False, stemming=stemming, remove_terms=remove_terms, synonyms=synonyms)
         NetMatrix = biblionetwork(M, analysis="co-occurrences", network="titles", n=n, sep=";")
     elif field == "AB":
-        M = term_extraction(M, field="AB", ngrams=ngrams, verbose=False, stemming=stemming, remove_terms=remove_terms, synonyms=synonyms)
+        # PATCH: pass plain DataFrame to term_extraction
+        M = term_extraction(M_plain, field="AB", ngrams=ngrams, verbose=False, stemming=stemming, remove_terms=remove_terms, synonyms=synonyms)
         NetMatrix = biblionetwork(M, analysis="co-occurrences", network="abstracts", n=n, sep=";")
     else:
         raise ValueError("Invalid field specified.")
 
-    # PATCH 2: thematic_map returned None when NetMatrix was empty, but
-    # get_thematic_map always unpacked 5 values from the result — crashing with
-    # TypeError: cannot unpack non-iterable NoneType object.
-    # → return a safe empty tuple of 5 values instead of None so the caller
-    # can handle the empty case without crashing.
     if not NetMatrix.empty:
         Net = network_plot(NetMatrix, normalize="association", Title="Keyword co-occurrences", type="auto",
                    labelsize=n_labels, halo=False, cluster=cluster, remove_isolates=True,
@@ -47,25 +44,22 @@ def thematic_map(df, field="ID", n=250, minfreq=5, ngrams=1, stemming=False, siz
         print("\n\nNetwork matrix is empty!\nThe analysis cannot be performed\n\n")
         return None, None, pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
+    # PATCH: network_plot may return None on small/empty graphs
+    if Net is None:
+        return None, None, pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+
     S = Net['S']
 
-    # Set row and column names to lowercase
     NetMatrix.index = NetMatrix.columns = NetMatrix.index.str.lower()
 
-    # Get graph and clusters
     net = Net['graph']
     net_groups = Net['cluster_obj']
     group = net_groups.membership
 
-    # Extract words and their groups from net_groups
     word = net.vs['name']
-    # PATCH 4: the variable `color` (list of node colors) was being overwritten
-    # by the loop variable `for color in colors` in the subgraphs block below.
-    # → renamed the node color list to `node_colors` to avoid the collision.
     node_colors = net.vs['color']
     node_colors = ["#D3D3D3" if c is None else c for c in node_colors]
 
-    # Find common words between NetMatrix and word list
     W = list(NetMatrix.index.intersection(word))
     index = NetMatrix.index.isin(W)
     ii = [i for i, w in enumerate(word) if w in W]
@@ -73,13 +67,11 @@ def thematic_map(df, field="ID", n=250, minfreq=5, ngrams=1, stemming=False, siz
     group = [group[i] for i in ii]
     node_colors = [node_colors[i] for i in ii]
 
-    # Calculate diagonal matrix C and subset matrices
     C = np.diag(NetMatrix.values)
     S = NetMatrix.values
     sEij = pd.DataFrame(S[np.ix_(index, index)], index=NetMatrix.index[index], columns=NetMatrix.columns[index])
     sC = C[index]
 
-    # Create dataframe with word data
     df_lab = pd.DataFrame({
         'sC': sC,
         'words': word,
@@ -88,7 +80,6 @@ def thematic_map(df, field="ID", n=250, minfreq=5, ngrams=1, stemming=False, siz
         'cluster_label': 'NA'
     })
 
-    # Filter and process cluster data
     df_lab = (df_lab[df_lab['sC'] >= minfreq]
             .groupby('groups')
             .apply(lambda x: pd.Series({
@@ -100,13 +91,11 @@ def thematic_map(df, field="ID", n=250, minfreq=5, ngrams=1, stemming=False, siz
             }))
             .reset_index())
 
-    # Explode both words and sC columns
     df_lab = df_lab.assign(
         words=df_lab['words'].str.split(', '),
         sC=df_lab['sC']
     ).explode(['words', 'sC']).reset_index(drop=True)
 
-    # Convert to upper triangle matrix and create edge dataframe
     index_names = sEij.index
     column_names = sEij.columns
     sEij = triu(sEij.values)
@@ -154,8 +143,6 @@ def thematic_map(df, field="ID", n=250, minfreq=5, ngrams=1, stemming=False, siz
         sEij_df['words2'].isin(df_lab['words'].unique())
     ]
 
-    # PATCH 3: error message was in Italian — translated to English for
-    # consistency with the rest of the codebase.
     if filtered_df.empty:
         raise ValueError(
             "The filter removed all rows. "
@@ -186,7 +173,6 @@ def thematic_map(df, field="ID", n=250, minfreq=5, ngrams=1, stemming=False, siz
         .reset_index()
     )
 
-    # Calculate plot parameters
     meandens = df['RankDensity'].mean()
     meancentr = df['RankCentrality'].mean()
     rangex = max(meancentr - df['RankCentrality'].min(), df['RankCentrality'].max() - meancentr)
@@ -294,7 +280,6 @@ def thematic_map(df, field="ID", n=250, minfreq=5, ngrams=1, stemming=False, siz
     fig._config = fig._config | {'modeBarButtonsToRemove': ['pan', 'select', 'lasso2d', 'toImage'],
                                  'displaylogo': False}
 
-    # Rename and rearrange columns in df_lab
     df_lab.columns = ['Cluster', 'Cluster_Frequency', 'Cluster_Label', 'Occurrences', 'Words', 'Color']
     df_lab = (df_lab
          .sort_values('Cluster')
@@ -327,9 +312,6 @@ def thematic_map(df, field="ID", n=250, minfreq=5, ngrams=1, stemming=False, siz
 
     if subgraphs:
         gcl = {}
-        # PATCH 4 (continued): renamed loop variable from `color` to
-        # `cluster_color` to avoid overwriting the `node_colors` list
-        # (previously `color`) used earlier in the function.
         unique_colors = df['color'].unique()
         for cluster_color in unique_colors:
             node_indices = [i for i, v in enumerate(Net['graph'].vs)
@@ -354,7 +336,11 @@ def thematic_map(df, field="ID", n=250, minfreq=5, ngrams=1, stemming=False, siz
 
     layout = Net['graph']['layout']
     coords = np.array([[pos[0], pos[1]] for pos in layout])
-    coords = coords / np.abs(coords).max()
+
+    # PATCH: avoid division by zero
+    abs_max = np.abs(coords).max()
+    if abs_max > 0:
+        coords = coords / abs_max
     coords[:, 0] *= 1000
     coords[:, 1] *= 400
 
@@ -362,11 +348,14 @@ def thematic_map(df, field="ID", n=250, minfreq=5, ngrams=1, stemming=False, siz
     node_sizes = []
     nodes = []
 
+    degrees = Net['graph'].degree()
+    min_deg = min(degrees) if degrees else 0
+    max_deg = max(degrees) if degrees else 1
+
     for idx, vertex in enumerate(Net['graph'].vs):
         cluster_id = Net['cluster_obj'].membership[vertex.index]
         node_color = cluster_colors[cluster_id]
 
-        min_deg, max_deg = min(Net['graph'].degree()), max(Net['graph'].degree())
         node_size = 10 if max_deg == min_deg else (15 * (vertex.degree() - min_deg) / (max_deg - min_deg) + 10)
         node_size = max(10, min(130, node_size))
         font_size = node_size * 2
@@ -529,10 +518,6 @@ def cluster_assignment(M, words, field, remove_terms=None, synonyms=None, thresh
 
     all_field['terms'] = all_field['terms'].astype(str)
 
-    # PATCH 7: all_field['terms'] was lowercased before the merge but
-    # words_for_merge['Words'] kept its original case — causing the merge
-    # to find no matches and produce all-NaN results silently.
-    # → lowercasing Words as well to ensure consistent case matching.
     words_for_merge = words_for_merge.copy()
     words_for_merge['Words'] = words_for_merge['Words'].str.lower()
 
@@ -573,12 +558,6 @@ def cluster_assignment(M, words, field, remove_terms=None, synonyms=None, thresh
     year = pd.Timestamp.now().year + 1
     M = M.reset_index(drop=True)
 
-    # PATCH 5: M['TC'] may contain non-numeric values or NaN — dividing
-    # directly causes TypeError. Using pd.to_numeric with errors='coerce'
-    # to safely convert, turning unparseable values into NaN.
-    # PATCH 6: if all TC values for a given year are 0, the mean is 0 and
-    # NTC produces NaN silently via division by zero.
-    # → replaced with a safe lambda that returns 0 when the mean is 0.
     tc_numeric = pd.to_numeric(M['TC'], errors='coerce').fillna(0)
     M = M.copy()
     M['TC'] = tc_numeric

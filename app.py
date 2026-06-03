@@ -5895,6 +5895,11 @@ with ui.tags.div(id="mainContent", class_="main-content"):
                                 result = co_occurrence_network_results.get()
                                 if result is not None:
                                     _, _, co_occurrence_network_tab, _ = result
+                                    if co_occurrence_network_tab is None or co_occurrence_network_tab.empty:
+                                        return ui.div(
+                                            ui.p("No data available for this network.", style="text-align: center; color: #999; font-size: 16px;"),
+                                            style="display: flex; flex-direction: column; justify-content: center; align-items: center; height: 300px; border: 2px dashed #ddd; border-radius: 10px; margin: 20px;"
+                                        )
                                     return ui.HTML(DT(co_occurrence_network_tab, style="width=100%;"))
                                 else:
                                     return ui.div(

@@ -90,10 +90,12 @@ def thematic_evolution(M, field="ID", years=None, n=250, min_freq=2, size=0.5, n
 
     for interval_label, Mk in list_df.items():
         Y.append(f"{min(Mk['PY'])}-{max(Mk['PY'])}")
-        Mk = reactive.Value(Mk)
+        # PATCH: thematic_map handles both reactive and plain DataFrames internally
+        # wrapping in reactive.Value is no longer needed
+        Mk_reactive = reactive.Value(Mk)
 
         resk_tuple = thematic_map(
-            Mk,
+            Mk_reactive ,
             field=field, n=n, minfreq=min_freq, ngrams=ngrams,
             stemming=stemming, size=size, n_labels=n_labels,
             repel=repel, remove_terms=remove_terms, synonyms=synonyms,
@@ -290,9 +292,8 @@ def timeslice(M, breaks=None, k=5):
     Returns:
         dict: Dictionary containing DataFrames for each sub-period.
     """
-    # PATCH 4: M.get() is not a standard pandas method — it was a custom method
-    # of a wrapper object that has since been removed. Using M.copy() to work
-    # on a copy and avoid mutating the original DataFrame passed by the caller.
+    # PATCH: M may be a Shiny reactive Value or a plain DataFrame
+    M = M.get() if hasattr(M, 'get') and callable(M.get) and not isinstance(M, pd.DataFrame) else M
     M = M.copy()
 
     M['PY'] = pd.to_numeric(M['PY'], errors='coerce')

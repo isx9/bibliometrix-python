@@ -20,12 +20,14 @@ def term_extraction(df, field="TI", ngrams=1, stemming=False, language="english"
     Returns:
         A DataFrame with the extracted terms.
     """
-    M = df.get()
+    # PATCH: df may be a Shiny reactive Value or a plain DataFrame.
+    # Track whether df is reactive so we can call df.set() at the end.
+    is_reactive = hasattr(df, 'get') and callable(df.get) and not isinstance(df, pd.DataFrame)
+    M = df.get() if is_reactive else df.copy()
 
     # Load and update stopwords
     overall_start_time = time.time()
 
-    # Load and update stopwords
     stop_words = set(nltk_stopwords.words(language))
     custom_stopwords = {"elsevier", "springer", "mdpi", "using", "however", "-", "present", "proposes",
                         "used", "proposed", "reserved", "recent", "years", "research", "study", "aims", 
@@ -33,7 +35,7 @@ def term_extraction(df, field="TI", ngrams=1, stemming=False, language="english"
                         "published", "aims", "limitations"}
     
     stop_words.update(custom_stopwords)
-    stop_words = list(stop_words)  # Convert to list for compatibility with CountVectorizer
+    stop_words = list(stop_words)
 
     # Convert text to lowercase and remove special characters
     M[f"{field}_TM"] = M[field].astype(str).str.lower()
@@ -80,24 +82,23 @@ def term_extraction(df, field="TI", ngrams=1, stemming=False, language="english"
     # Combine extracted terms into a list for each document
     start_time = time.time()
 
-    # Get a boolean matrix for terms present (saves operations) (OPTIMIZATION BY GPT from 30 seconds to 0.1 seconds)
-    non_zero_mask = terms_df.values > 0  # Mask for values > 0
-    # Create a list of lists with the actual terms for each document
+    non_zero_mask = terms_df.values > 0
     extracted_terms = [
         [terms_df.columns[i].replace("__", "-").replace("_", " ").replace("-", " ")
          for i in np.where(non_zero_mask[row_idx])[0]]
         for row_idx in range(non_zero_mask.shape[0])
     ]
 
-    # Assign the result to the destination column
     M[f"{field}_TM"] = extracted_terms
     print(f"Term combination into lists per document done in {time.time() - start_time:.4f} seconds")
 
-    # Show results (if verbose is True)
     if verbose:
         print(terms_df.sum().sort_values(ascending=False).head(25))
 
-    # Finalize the output
-    df.set(M)
-
-    return df
+    # PATCH: only call df.set() if df is a reactive object.
+    # For plain DataFrames, just return M directly.
+    if is_reactive:
+        df.set(M)
+        return df
+    else:
+        return M

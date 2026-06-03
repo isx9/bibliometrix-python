@@ -11,7 +11,7 @@ Main entry point:
 """
 
 import pandas as pd
-from mappings import PUBMED_MAPPING, OPENALEX_MAPPING
+from www.services.mappings import PUBMED_MAPPING, OPENALEX_MAPPING
 
 
 # NOTE: SR() is copied directly from www/services/metatagextraction.py
