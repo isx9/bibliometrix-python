@@ -138,6 +138,15 @@ def wos(M, min_citations, sep, network):
 
     CR_df = pd.DataFrame(CR)
 
+    # PATCH: if no valid references were parsed (e.g. OpenAlex URL-based CR),
+    # return early with LCS=0 for all documents to avoid hanging.
+    if CR_df.empty:
+        M['LCS'] = 0
+        M['LABEL'] = M['SR_FULL'].fillna('').astype(str).str.upper()
+        histData = M[M['TC'] >= min_citations][['LABEL', 'TI', 'DE', 'ID', 'DI', 'PY', 'LCS', 'TC']].copy()
+        histData.columns = ['Paper', 'Title', 'Author_Keywords', 'KeywordsPlus', 'DOI', 'Year', 'LCS', 'GCS']
+        return {'NetMatrix': None, 'histData': histData, 'M': M, 'LCS': M['LCS'].tolist()}
+
     # SAFE SR_FULL
     if 'SR_FULL' not in M.columns:
         M['SR_FULL'] = ""
