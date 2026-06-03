@@ -25,13 +25,20 @@ def thematic_map(df, field="ID", n=250, minfreq=5, ngrams=1, stemming=False, siz
     elif field == "DE":
         NetMatrix = biblionetwork(M, analysis="co-occurrences", network="author_keywords", n=n, sep=";", remove_terms=remove_terms, synonyms=synonyms)
     elif field == "TI":
-        # PATCH: pass plain DataFrame to term_extraction
-        M = term_extraction(M_plain, field="TI", ngrams=ngrams, verbose=False, stemming=stemming, remove_terms=remove_terms, synonyms=synonyms)
-        NetMatrix = biblionetwork(M, analysis="co-occurrences", network="titles", n=n, sep=";")
+        # PATCH: run term_extraction on plain DataFrame to get TI_TM column
+        M_extracted = term_extraction(M_plain, field="TI", ngrams=ngrams, verbose=False, stemming=stemming, remove_terms=remove_terms, synonyms=synonyms)
+        # PATCH: wrap in reactive so biblionetwork/cocMatrix can call .get()
+        NetMatrix = biblionetwork(reactive.Value(M_extracted), analysis="co-occurrences", network="titles", n=n, sep=";")
+        # PATCH: update m with TI_TM so cluster_assignment can use it
+        m["TI_TM"] = M_extracted["TI_TM"].values
+        M = reactive.Value(M_extracted)
     elif field == "AB":
-        # PATCH: pass plain DataFrame to term_extraction
-        M = term_extraction(M_plain, field="AB", ngrams=ngrams, verbose=False, stemming=stemming, remove_terms=remove_terms, synonyms=synonyms)
-        NetMatrix = biblionetwork(M, analysis="co-occurrences", network="abstracts", n=n, sep=";")
+        # PATCH: same as TI
+        M_extracted = term_extraction(M_plain, field="AB", ngrams=ngrams, verbose=False, stemming=stemming, remove_terms=remove_terms, synonyms=synonyms)
+        NetMatrix = biblionetwork(reactive.Value(M_extracted), analysis="co-occurrences", network="abstracts", n=n, sep=";")
+        # PATCH: update m with AB_TM so cluster_assignment can use it
+        m["AB_TM"] = M_extracted["AB_TM"].values
+        M = reactive.Value(M_extracted)
     else:
         raise ValueError("Invalid field specified.")
 
@@ -337,7 +344,6 @@ def thematic_map(df, field="ID", n=250, minfreq=5, ngrams=1, stemming=False, siz
     layout = Net['graph']['layout']
     coords = np.array([[pos[0], pos[1]] for pos in layout])
 
-    # PATCH: avoid division by zero
     abs_max = np.abs(coords).max()
     if abs_max > 0:
         coords = coords / abs_max
@@ -476,6 +482,10 @@ def cluster_assignment(M, words, field, remove_terms=None, synonyms=None, thresh
 
     if field in ["AB", "TI"]:
         field = f"{field}_TM"
+
+    # PATCH: safety check if field doesn't exist in M
+    if field not in M.columns:
+        return pd.DataFrame()
 
     Fi = M[field]
 
