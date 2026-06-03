@@ -11,7 +11,8 @@ def get_annual_production(df):
     Returns:
         A Plotly figure object representing the annual scientific production.
     """
-    data = df.get()
+    data = df.get() if hasattr(df, 'get') and callable(df.get) and not isinstance(df, pd.DataFrame) else df
+    data["PY"] = pd.to_numeric(data["PY"], errors="coerce").fillna(0).astype(int)  # PATCH: ensure PY is int
 
     # Calculate the number of publications per year
     publications_per_year = data["PY"].value_counts().sort_index().reset_index()
@@ -22,7 +23,7 @@ def get_annual_production(df):
     max_year = publications_per_year["Year"].max()
 
     # Ensure all years in the range are present
-    all_years = pd.DataFrame({"Year": range(min_year, max_year + 1)})
+    all_years = pd.DataFrame({"Year": range(int(min_year), int(max_year) + 1)})
     publications_per_year = all_years.merge(publications_per_year, on="Year", how="left").fillna(0)
 
     # Create the plot
