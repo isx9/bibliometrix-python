@@ -12,6 +12,8 @@ def get_average_citations(df):
         A Plotly figure object representing the average citations per year.
     """
     data = df.get()
+    data["PY"] = pd.to_numeric(data["PY"], errors='coerce')
+
 
     # Calculate the current year
     current_year = pd.Timestamp.now().year + 1
