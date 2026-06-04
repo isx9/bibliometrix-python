@@ -15,3 +15,6 @@ from .tabletag import *
 from .termextraction import *
 from .thematicmap import *
 from .utils import *
+from .api_retriever import retrieve
+from .standardizer import standardize
+from .validator import validate

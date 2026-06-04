@@ -854,7 +854,124 @@ with ui.tags.div(id="mainContent", class_="main-content"):
                 ),
 
         with ui.nav_panel("None", value="API"):
-            ui.h3("🚧 Warning: API is under construction 🚧")
+            ui.h3("🔌 API Query", style="color: #5567BB;")
+            ui.p("Retrieve data directly from OpenAlex or PubMed via API, without manual download.")
+
+            api_result = reactive.Value(None)
+
+            with ui.layout_sidebar(fillable=False, fill=False):
+                with ui.sidebar(id="sidebar_api", position="right"):
+                    ui.h5("Query Parameters", style="color: #5567BB;")
+                    ui.input_text("api_query", "Search Query", placeholder="es. machine learning")
+                    ui.input_select(
+                        "api_platform",
+                        "Platform",
+                        {"openalex": "OpenAlex", "pubmed": "PubMed"}
+                    )
+                    ui.input_numeric("api_total", "Number of records", value=200, min=10, max=1000)
+                    ui.input_action_button("run_api", "Run Query", icon=ICONS["play"])
+
+                @reactive.effect
+                @reactive.event(input.run_api)
+                def run_api_pipeline():
+                    def loading_modal():
+                        phrases = [
+                            "⏳ Loading... Please wait.",
+                            "🌐 Querying the API...",
+                            "📦 Retrieving records...",
+                            "🔄 Standardizing data...",
+                            "✅ Validating output...",
+                            "✨ Almost there! Preparing your dataset...",
+                        ]
+                        modal = ui.modal(
+                            ui.div(
+                                ui.img(
+                                    src="https://cisslaboral.laleynext.es/Img/loader-circle.gif",
+                                    height="150px",
+                                    style="display: block; margin: 0 auto; text-align: center;",
+                                ),
+                                ui.h4(
+                                    phrases[0],
+                                    id="loading-phrase",
+                                    style="font-size: 15px; text-align: center; margin-top: 20px; color: gray;",
+                                ),
+                            ),
+                            easy_close=False,
+                            footer=None,
+                        )
+                        js = f"""
+                        <script>
+                        (function() {{
+                            var phrases = {phrases};
+                            var idx = 0;
+                            var el = document.getElementById('loading-phrase');
+                            if (el) {{
+                                setInterval(function() {{
+                                    idx = (idx + 1) % phrases.length;
+                                    el.textContent = phrases[idx];
+                                }}, 1000);
+                            }}
+                        }})();
+                        </script>
+                        """
+                        return ui.HTML(str(modal) + js)
+
+                    ui.modal_show(loading_modal())
+                    try:
+                        query = input.api_query()
+                        platform = input.api_platform()
+                        total = input.api_total()
+
+                        if not query:
+                            ui.notification_show("⚠️ Please enter a search query.", type="warning", duration=5)
+                            return
+
+                        records = retrieve(query=query, platform=platform, total=total)
+                        df_api = standardize(records, source=platform)
+                        df_api = validate(df_api)
+
+                        api_result.set(df_api)
+                        df.set(df_api)  # rende i dati disponibili a tutta la dashboard
+
+                        ui.notification_show(
+                            f"✅ {len(df_api)} records retrieved from {platform.capitalize()} and loaded successfully.",
+                            duration=5,
+                            close_button=False
+                        )
+                    except Exception as e:
+                        ui.notification_show(f"❌ Error: {str(e)}", type="error", duration=10)
+                    finally:
+                        ui.modal_remove()
+
+                ui.h4("Description", style="color: #5567BB;")
+                ui.p(
+                    "This section allows you to retrieve bibliographic data directly via API "
+                    "from OpenAlex or PubMed, without manually downloading any file. "
+                    "The data is automatically standardized to the WoS schema and validated, "
+                    "then loaded into the dashboard for analysis."
+                )
+
+                @render.ui
+                def show_api_result():
+                    result = api_result.get()
+                    if result is None:
+                        return ui.div(
+                            ui.p(
+                                "Enter a query, select a platform and click Run Query.",
+                                style="text-align: center; color: #666; font-size: 16px;"
+                            ),
+                            style=(
+                                "height: 300px; display: flex; flex-direction: column; "
+                                "justify-content: center; align-items: center; "
+                                "border: 2px dashed #ddd; border-radius: 10px; margin: 20px;"
+                            )
+                        )
+                    return ui.div(
+                        ui.h5(f"✅ Dataset loaded: {len(result)} records, {len(result.columns)} columns", style="color: #5567BB;"),
+                        ui.HTML(DT(result[['AU', 'TI', 'PY', 'SO', 'TC', 'DB', 'SR']].head(10), style="width:100%;")),
+                        ui.p("Navigate to any analysis section from the sidebar to explore the data.", style="color: gray; font-size: 13px;")
+                    )
+            
         
         with ui.nav_panel("None", value="collections"):
             ui.h3("🚧 Warning: Merge Collection is under construction 🚧")
