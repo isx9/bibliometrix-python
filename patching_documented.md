@@ -72,7 +72,11 @@ Written by our team as part of the ETL pipeline. No DataFrame testing needed, it
    - Fix: replaced with isinstance(df, pd.DataFrame) check:
      - if it's a DataFrame → copy it directly
      - if it's a Shiny reactive object → use .get() to unwrap it
-     - 
+
+### networkplot.py
+**Status:** PASS (both sources)
+
+       
 
 ## Known Limitations In Services
 ### CR Field - OpenAlex
@@ -92,9 +96,7 @@ dataset), making the pipeline impractical and likely to hit  rate limits.
 **Conclusion:** Known API limitation of the eSummary endpoint used in the ETL pipeline.
 
 
-To add:
-- CR matrix is empty for both sources → coupling map cannot 
-  be built
+
 
 
 
