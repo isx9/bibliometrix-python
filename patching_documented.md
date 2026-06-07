@@ -19,13 +19,9 @@ The Field=AB for PubMed returns an empty matrix. This is fine and it's caused by
 
 ### couplingmap.py
 **Status: PASS after patching** (both sources)
-
 **Error found:** `TypeError: NDFrame.get() missing 1 required positional argument: 'key'`
-
 **Root cause:** Bug in metatagextraction.py line 12 — not a bug  in couplingmap.py itself
-
 **Fix:** We need to fix metatagextraction.py first, then retest couplingmap.py
-
 **Patches applied:** SR() function in metatagextraction.py, infinite loop fix:
    - Original while loop caused infinite loop in pandas >= 2.0 due to boolean index assignment issues with RangeIndex
    - Fixed by using a dictionary to track duplicates and  converting SR to string first to handle NaN values
@@ -39,7 +35,6 @@ uploading a standardized ETL-produced CSV. Not applicable to  OpenAlex/PubMed ET
 
 ### histnetwork.py
 **Status:** **PASS after patching** (both sources)
-
 **Patches applied:**
 1. Line 9: `M = df.get()` → fixed with isinstance check
    - Reason: pandas .get() requires a column name, crashes without one
@@ -61,23 +56,19 @@ So it's not a bug in histplot.py itself. The limitation  comes from the CR data 
 
 ### htmldownload.py
 **Status:** Not applicable to ETL testing
-
 **Reason:** This is a dashboard utility for downloading plots as PNG images using a headless Chrome browser. It takes an HTML file path as input, not a DataFrame. Not part of the ETL pipeline.
 
 ### igraph2vis.py
 **Status:** Not applicable to ETL testing
-
 **Reason:** This is a visualization utility that converts igraph network objects to interactive HTML/vis.js format. It takes a graph object as input, not a DataFrame. Not part of the ETL pipeline.
 
 ### mappings.py
 **Status:** PASS (import check only)
-
 **Reason:** Contains mapping dictionaries (PUBMED_MAPPING, OPENALEX_MAPPING) that translate raw API field names to WoS tags. 
 Written by our team as part of the ETL pipeline. No DataFrame testing needed, it is a static lookup table imported by standardizer.py.
 
 ### metatagextraction.py
 **Status: PASS after patching** (all fields, both sources)
-
 **Patches applied:**
 1. Lines 11-13: `hasattr(df, "get")` check → fixed with isinstance check
    - Reason: pandas DataFrames also have a .get() method, so hasattr(df, "get") was always True for plain DataFrames too.
@@ -89,29 +80,60 @@ Written by our team as part of the ETL pipeline. No DataFrame testing needed, it
 ### networkplot.py
 **Status:** PASS (both sources)
 
-       
+### parsers.py
+**Status:** Not applicable to ETL testing
+**Reason:** Contains raw file parsers for direct dashboard uploads (parse_wos_data, parse_pubmed_data, parse_cochrane_data). Takes file paths as input, not DataFrames. Never called when uploading a standardized ETL-produced CSV. 
+
+### plotlydownload.py
+**Status:** Not applicable to ETL testing
+**Reason:** Dashboard utility for downloading Plotly figures as PNG images. Takes a Plotly figure object as input, not a DataFrame. Never called during data processing or analysis. Not part of the ETL pipeline.
+
+### savereport.py
+**Status:** Not applicable to ETL testing
+**Reason:** Dashboard utility for saving and exporting reports as Excel files. Takes report objects, tables and plots as input, not a DataFrame. Never called during data processing or analysis. Not part of the ETL pipeline.
+
+### standardizer.py
+**Status:** PASS (import check only)
+**Reason:** Written by our team as part of the ETL pipeline. Transforms raw API records from OpenAlex and PubMed into the standard WoS schema DataFrame. Already validated by test.py which produced test_openalex.csv and test_pubmed.csv successfully.Not tested with a DataFrame — it is the component that produces the DataFrame.
+
+### tabletag.py
+**Status:** PASS (both sources)
+
+### termextraction.py
+**Status:** PASS (both sources)
+**Notes:** Was failing with: LookupError: Resource stopwords not found. Fixed by downloading missing NLTK data:
+  nltk.download('stopwords')
+  nltk.download('punkt')
+  nltk.download('punkt_tab')
+
+### thematicmap.py
+**Status:** PASS (both sources)
+**Patches applied:**
+1. Lines 9-11: Reactive/DataFrame check — correctly uses `not isinstance(df, pd.DataFrame)` before calling `.get()` so it handles both plain DataFrames and Shiny reactive objects
+2. Lines 30-41: `reactive.Value()` wrapping for biblionetwork calls when processing TI and AB fields — needed because biblionetwork expects a reactive object in some code paths
+3. Line 54: Safety check added — network_plot may return None on small or empty graphs, handled gracefully
+4. Line 486: Safety check added — if field doesn't exist in DataFrame, function returns gracefully instead of crashing
+**Notes:** TI_TM and AB_TM are derived at runtime by term_extraction, these are not part of the required ETL schema
+
+### utils.py
+**Status:** Not applicable to ETL testing
+**Reason:** Contains only empty_plot(), a UI utility that generates a placeholder plot for the dashboard before analysis runs. Takes no DataFrame as input. Not part of the ETL pipeline.
 
 ## Known Limitations In Services
 ### CR Field - OpenAlex
 **Issue:** OpenAlex returns cited references (CR) as URLs (e.g. https://openalex.org/W2101234009) instead of formatted citation strings (e.g. "Smith J, 2019, NATURE").
-
 **Impact:** Functions that depend on formatted CR strings will return empty results for OpenAlex data:
 - histNetwork → NetMatrix = None
 - histPlot → SKIP (depends on histNetwork)
 - co-citation networks → empty
-  
 **Why not fixed:** Resolving each URL would require additional  API calls per reference (potentially thousands for a 200 paper 
 dataset), making the pipeline impractical and likely to hit  rate limits.
-
 **Conclusion:** This is an OpenAlex API design choice, not a  bug in the ETL pipeline. The spec states functions should work "assuming the raw data contains the necessary underlying  information" — OpenAlex does not provide formatted citation  strings directly.
 
 ### CR Field - PubMed
 **Issue:** PubMed eSummary API does not return cited references.
-
 **Impact:** Same functions as above will return empty results.
-
 **Why not fixed:** Would require switching to a different PubMed endpoint (efetch) which returns a different data format and would require significant changes to the parser.
-
 **Conclusion:** Known API limitation of the eSummary endpoint used in the ETL pipeline.
 
 
