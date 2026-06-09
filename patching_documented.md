@@ -139,18 +139,59 @@ dataset), making the pipeline impractical and likely to hit  rate limits.
 
 
 
-
-
-
-
 ---
 
 
 
 ## Functions
 
+### get_affiliationproductionovertime.py
+**Status:** PASS (both sources) 
+
 ### get_annualproduction.py
-**Status:** PASS (OpenAlex, PubMed)  
+**Status:** PASS (both sources) 
 **Patches applied:** PY forced to int safely
+
+### get_authorlocalimpact.py
+**Status: PASS after patching** (both sources)
+**Patches applied:** Line 16: `df = df.get()` → fixed with isinstance check. Reason: pandas DataFrames also have a .get() method which requires a column name as argument, calling it without arguments crashes with: TypeError: NDFrame.get() missing. 1 required positional argument: 'key'. Fix: replaced with isinstance(df, pd.DataFrame) check if it's a DataFrame → just copy it directly, if it's a Shiny reactive object → use .get() to unwrap it.
+
+### get_authorproductionovertime.py
+**Status: PASS after patching** (both sources)
+**Patches applied:** Line 19: `data = df.get()` → fixed with isinstance check. Same reasons as in the previous file.
+
+### get_averagecitations.py
+**Status: PASS after patching** (both sources)
+**Patches applied:** 
+- Line 14: `data = df.get()` → fixed with isinstance check.
+- Line 32: `current_year - table["PY"]` → TypeError. Reason: PY is stored as string in the standardized DataFrame but the function requires arithmetic subtraction which needs integers. Fix: added `pd.to_numeric(table["PY"], errors="coerce")` before the calculation.
+
+### get_bradfordlaw.py
+**Status: PASS after patching** (both sources)
+**Patches applied:** 1. Line 15: `data = df.get()` → fixed with isinstance check
+
+### get_citedcountries.py
+**Status: PASS after patching** (both sources)
+**Patches applied:** Line 110: `int(max_x // 10)` → ValueError: cannot convert float NaN to integer. Reason: PubMed has no affiliation data so AU1_CO is empty, x_values is empty, and x_values.max() returns NaN. int(NaN) crashes with ValueError. Fix: added safety check before plotting — if x_values is empty or max_x is NaN, return empty figure instead of crashing
+
+### get_clusteringcoupling.py
+**Status:** PASS (both sources) 
+**Notes:** OpenAlex: coupling map cannot be built because CR contains URLs instead of formatted citation strings → NCS is None. PubMed: coupling map cannot be built because CR is empty from eSummary API → matrix is empty. Both cases handled gracefully, no crashes. This is a known CR field limitation, not a bug in the function.
+
+### get_co_occurence_network.py
+**Status: PASS after patching** (both sources)
+**Patches applied:** field_by_year() line 425: `years = M['PY'].values` → added pd.to_numeric() conversion. Reason: PY is stored as string, np.percentile requires numeric values. Fix: `years = pd.to_numeric(M['PY'], errors='coerce').values`
+**Warnings (non-blocking):**
+- Line 437: `n[col_idx]` uses deprecated integer indexing on Series
+  - Will break in future pandas versions
+  - Fix: change to `n.iloc[col_idx]`
+  - Not fixed now as it does not cause crashes in current version
+ 
+### get_cocitation.py
+**Status:** PASS (both sources) 
+
+**Known limitations:**
+- PubMed returns empty results for country analysis because eSummary API does not return affiliation data (C1 column is empty) so AU1_CO cannot be derived
+
 
 ---
