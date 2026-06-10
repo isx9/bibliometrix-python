@@ -147,51 +147,130 @@ dataset), making the pipeline impractical and likely to hit  rate limits.
 
 ### get_affiliationproductionovertime.py
 **Status:** PASS (both sources) 
+**Patches:**
+1. metaTagExtraction called before use to derive AU_UN column
+2. Reactive/DataFrame check — correctly uses `not isinstance(df, pd.DataFrame)`
+3. Safety check: AU_UN missing after extraction → returns empty figure
+4. Safety check: AFFY empty after filtering → returns empty figure
+5. Safety check: AffOverTime empty → returns empty figure
 
 ### get_annualproduction.py
 **Status:** PASS (both sources) 
-**Patches applied:** PY forced to int safely
+**Patches applied:**
+1. Reactive/DataFrame check — correctly uses `not isinstance(df, pd.DataFrame)`
+2. PY column forced to int safely with `pd.to_numeric(errors="coerce").fillna(0)`
+
 
 ### get_authorlocalimpact.py
-**Status: PASS after patching** (both sources)
-**Patches applied:** Line 16: `df = df.get()` → fixed with isinstance check. Reason: pandas DataFrames also have a .get() method which requires a column name as argument, calling it without arguments crashes with: TypeError: NDFrame.get() missing. 1 required positional argument: 'key'. Fix: replaced with isinstance(df, pd.DataFrame) check if it's a DataFrame → just copy it directly, if it's a Shiny reactive object → use .get() to unwrap it.
+**Status:** PASS (both sources)
+**Patches applied:**
+1. Line 16: `df = df.get()` → fixed with isinstance check. Reason: pandas .get() requires a column name, crashes without one. Fix: isinstance(df, pd.DataFrame) check
 
 ### get_authorproductionovertime.py
-**Status: PASS after patching** (both sources)
-**Patches applied:** Line 19: `data = df.get()` → fixed with isinstance check. Same reasons as in the previous file.
+**Status:** PASS (both sources)
+**Patches applied:**
+1. Line 19: `data = df.get()` → fixed with isinstance check
 
 ### get_averagecitations.py
-**Status: PASS after patching** (both sources)
+**Status:** PASS (both sources)
 **Patches applied:** 
 - Line 14: `data = df.get()` → fixed with isinstance check.
 - Line 32: `current_year - table["PY"]` → TypeError. Reason: PY is stored as string in the standardized DataFrame but the function requires arithmetic subtraction which needs integers. Fix: added `pd.to_numeric(table["PY"], errors="coerce")` before the calculation.
 
 ### get_bradfordlaw.py
-**Status: PASS after patching** (both sources)
-**Patches applied:** 1. Line 15: `data = df.get()` → fixed with isinstance check
+**Status:** PASS (both sources)
+**Patches applied:**
+1. Line 15: `data = df.get()` → fixed with isinstance check
 
 ### get_citedcountries.py
-**Status: PASS after patching** (both sources)
-**Patches applied:** Line 110: `int(max_x // 10)` → ValueError: cannot convert float NaN to integer. Reason: PubMed has no affiliation data so AU1_CO is empty, x_values is empty, and x_values.max() returns NaN. int(NaN) crashes with ValueError. Fix: added safety check before plotting — if x_values is empty or max_x is NaN, return empty figure instead of crashing
+**Status:** PASS (both sources)
+**Patches applied:**
+1. Reactive/DataFrame check — correctly uses `not isinstance(df, pd.DataFrame)`
+2. Filter for empty AU1_CO strings added — dropna alone does not catch empty strings
+3. Line 110: safety check added before `int(max_x // 10)`. Reason: PubMed has no affiliation data, x_values is empty, x_values.max() returns NaN, int(NaN) crashes. Fix: return empty figure if x_values is empty or max_x is NaN.
+**Known limitations:**
+- PubMed returns empty results — eSummary API provides no affiliation data
 
 ### get_clusteringcoupling.py
 **Status:** PASS (both sources) 
-**Notes:** OpenAlex: coupling map cannot be built because CR contains URLs instead of formatted citation strings → NCS is None. PubMed: coupling map cannot be built because CR is empty from eSummary API → matrix is empty. Both cases handled gracefully, no crashes. This is a known CR field limitation, not a bug in the function.
+**Patches applied:**
+1. Safety check: couplingMap returns None when network is empty → returns empty figures instead of crashing
+**Known limitations:**
+- OpenAlex: CR contains URLs, coupling map cannot be built
+- PubMed: CR empty from eSummary API, coupling map cannot be built
+
 
 ### get_co_occurence_network.py
-**Status: PASS after patching** (both sources)
-**Patches applied:** field_by_year() line 425: `years = M['PY'].values` → added pd.to_numeric() conversion. Reason: PY is stored as string, np.percentile requires numeric values. Fix: `years = pd.to_numeric(M['PY'], errors='coerce').values`
+**Status:** PASS (both sources)
+**Patches applied:**
+1. field_by_year() line 425: PY converted to numeric before percentile calculation. Reason: PY stored as string, np.percentile requires numeric values. Fix: `pd.to_numeric(M['PY'], errors='coerce').values`
 **Warnings (non-blocking):**
-- Line 437: `n[col_idx]` uses deprecated integer indexing on Series
-  - Will break in future pandas versions
-  - Fix: change to `n.iloc[col_idx]`
-  - Not fixed now as it does not cause crashes in current version
+- Line 437: `n[col_idx]` uses deprecated integer indexing on Series. Will break in future pandas versions. Fix: change to `n.iloc[col_idx]`
  
 ### get_cocitation.py
 **Status:** PASS (both sources) 
-
 **Known limitations:**
-- PubMed returns empty results for country analysis because eSummary API does not return affiliation data (C1 column is empty) so AU1_CO cannot be derived
+- PubMed: co-citation matrix empty — CR not returned by eSummary API
+- OpenAlex: CR contains URLs, co-citation results limited
+
+### get_collaborationnetwork.py
+**Status:** PASS (both sources) 
+**Patches applied:**
+1. Reactive/DataFrame check — correctly uses `not isinstance(df, pd.DataFrame)` before calling `.get()`
+2. Safety check: network_plot returns None when graph is empty → returns empty figures instead of crashing
+**Notes:**
+- Field argument accepts "COL_AU", "COL_UN", "COL_CO"
+- Tested with COL_AU (author collaboration network)
+- COL_UN and COL_CO depend on AU_UN and AU_CO derived columns computed at runtime by metaTagExtraction
+
+### get_correspondingauthorcountries.py
+**Status:**  PASS (both sources) 
+**Patches applied:**
+1. Reactive/DataFrame check — correctly uses `not isinstance(df, pd.DataFrame)` before calling `.get()`
+2. Filter for empty AU1_CO strings — dropna alone does not catch empty strings
+3. Safety check after filtering — if all countries were blank, returns empty figure instead of crashing
+**Known limitations:**
+- Results will be empty for PubMed and limited for OpenAlex because affiliation data (C1) is often missing, so AU1_CO cannot be derived
+
+### get_countriesproduction.py
+**Status:** PASS (both sources) 
+**Patches applied:**
+1. Reactive/DataFrame check — correctly uses `not isinstance(df, pd.DataFrame)` before calling `.get()`
+2. Filter for empty AU_CO strings after explode — prevents empty country strings from being counted
+**Known limitations:**
+- Results will be limited for OpenAlex and empty for PubMed because affiliation data (C1) is often missing, so AU_CO cannot be derived
+
+### get_countriesproductionovertime.py
+**Status:** PASS (both sources) 
+**Patches applied:**
+1. Reactive/DataFrame check — correctly uses `not isinstance(df, pd.DataFrame)` before calling `.get()`
+2. Safety check: AFFY empty after filtering → returns empty figure
+3. Safety check: AffOverTime empty → returns empty figure
+**Known limitations:**
+- Results will be limited for OpenAlex and empty for PubMed because affiliation data (C1) is often missing, so AU_CO cannot be derived
+
+### get_factorialanalysis.py
+**Status:** PASS (both sources) 
+**Patches applied:**
+1. Line 82: Reactive/DataFrame check — correctly uses `not isinstance(df, pd.DataFrame)` before calling `.get()`
+2. Line 91: `df_plain` passed to conceptual_structure instead of original `df` — ensures plain DataFrame is used, not the reactive wrapper
+3. (line 244): safety check if all Dim2 values are equal — range is 0 and label_offset would cause division by zero
+4. (line 614): safety check if results.get() returns None — neither 'df' nor 'res' key exists in results
+5. (line 593): safety check if all terms filtered out by min_degree — CW would be empty DataFrame
+6. (line 637): safety check if n_clusters greater than number of available terms
+7. (line 818): safety check if all points equidistant from centroid
+8. Line 549: `CW.loc` crashes when CW is None. Reason: cocMatrix returns None when ID field is empty (Keywords Plus always empty for OpenAlex and PubMed). Fix: added None check before CW.loc call, returns empty result instead of crashing.
+**Known limitations:**
+- ID (Keywords Plus) always empty for OpenAlex and PubMed so conceptual_structure produces empty results for both sources
+
+### get_filters.py
+**Status:** PASS (both sources) 
+**Patches applied:**
+1. PY column forced to numeric safely with `pd.to_numeric(errors="coerce").fillna(0).astype(int)`
+2. TC column forced to numeric safely with same pattern
+3. Line 15: `data = df.get()` → fixed with isinstance check. Reason: pandas .get() requires a column name as argument, crashes without one. Fix: isinstance(df, pd.DataFrame) check: if it's a DataFrame → copy it directly; if it's a Shiny reactive object → use .get() to unwrap it.
+**Notes:**
+- get_filtered_table() in the same file is not testable, it requires Shiny input objects (input.year_slider(), input.languages(), etc.) only available inside the dashboard
 
 
 ---
