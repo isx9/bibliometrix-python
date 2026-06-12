@@ -272,5 +272,49 @@ dataset), making the pipeline impractical and likely to hit  rate limits.
 **Notes:**
 - get_filtered_table() in the same file is not testable, it requires Shiny input objects (input.year_slider(), input.languages(), etc.) only available inside the dashboard
 
+### get_frequentwords.py
+**Status:** PASS (all word types, both sources)
+**Patches applied:**
+1. Reactive/DataFrame check — correctly uses `not isinstance(df, pd.DataFrame)` before calling `.get()`
+2. Same reactive/DataFrame check for `df_plain` passed to `term_extraction`
+3. `safe_parse()` replaces `eval()` for DE/ID columns — handles malformed strings without crash
+4. filter with `isinstance(sublist, list)` before iterating — avoids TypeError on None or str in TI/AB path
+5. `remove_terms` applied to all tags, not just DE/ID — fixes silent bug where stopword removal was skipped for TI/AB
+6. wrapped `term_extraction()` call in `try/except ValueError` — returns `{}` when vocabulary is empty
+**Known limitations:**
+- AB/PubMed returns empty results — PubMed eSummary API does not return abstracts, so the vocabulary is empty. Not an ETL bug.
+
+### get_historiograph.py
+**Status:** PASS (both sources)
+**Patches applied:**
+1. Replaced two `raise ValueError` blocks after `histNetwork()` returns None with a graceful return: empty DataFrame and temp HTML file path instead of crashing, consistent with the pattern used in get_clusteringcoupling.py and get_citedcountries.py. Removed redundant first `if hist_results is None` check — the second condition already covers it.
+2. node_label="ID" branch: replaced unsafe `eval()` on Author_Keywords with a safe parser that handles list, semicolon-separated, and comma-separated formats without crashing on non-Python strings.
+3. node_label="DE" branch: same safe parser applied to KeywordsPlus field for the same reason.
+**Known limitations:**
+- OpenAlex: CR contains URLs instead of formatted citation strings, histNetwork cannot build a citation graph, function returns empty result
+- PubMed: CR is empty from eSummary API, same outcome
+- Actual historiograph output requires WoS or Scopus formatted citation strings in CR
+
+### get_localcitedauthors.py
+**Status:** PASS (both sources)
+**Patches applied:**
+1. Reactive/DataFrame check — correctly uses `not isinstance(df, pd.DataFrame)` before calling `.get()` to unwrap Shiny reactive objects
+2. Early return if all LCS values are 0 — avoids hanging on OpenAlex data where CR contains URLs and histNetwork cannot build a citation graph
+**Known limitations:**
+- OpenAlex: CR contains URLs instead of formatted citation strings, LCS is always 0, function returns empty result
+- PubMed: CR is empty from eSummary API, same outcome
+- Actual local cited authors output requires WoS or Scopus formatted citation strings in CR
+
+### get_localciteddocuments.py
+**Status:** PASS (both sources)
+**Patches applied:**
+1. Line 16: `M = df.get()` → fixed with isinstance check. Reason: pandas .get() requires a column name as argument, crashes without one. Fix: isinstance(df, pd.DataFrame) check: if it's a DataFrame → use it directly; if it's a Shiny reactive object → use .get() to unwrap it.
+**Known limitations:**
+- OpenAlex: CR contains URLs instead of formatted citation strings, LCS is always 0, function returns empty result
+- PubMed: CR is empty from eSummary API, same outcome
+- Actual local cited documents output requires WoS or Scopus formatted citation strings in CR
+
 
 ---
+
+
