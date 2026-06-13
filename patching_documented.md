@@ -314,6 +314,73 @@ dataset), making the pipeline impractical and likely to hit  rate limits.
 - PubMed: CR is empty from eSummary API, same outcome
 - Actual local cited documents output requires WoS or Scopus formatted citation strings in CR
 
+### get_localcitedreferences.py
+**Status:** PASS (both sources)
+**Patches applied:**
+1. Line 19: `data = df.get()` → fixed with isinstance check. Reason: pandas .get() requires a column name as argument, crashes without one. Fix: `data = df if isinstance(df, pd.DataFrame) else df.get()`.
+2. After filtering step: added early return when `source_counts` is empty. Reason: PubMed CR is always empty, causing `max_x` to be NaN and crashing downstream with `ValueError: cannot convert float NaN to integer` when computing x-axis ticks. Fix: return `(go.Figure(), empty_df)` gracefully.
+
+### get_localcitedsources.py
+**Status:** PASS (both sources)
+**Patches applied:**
+1. Line 10: `data = df.get().copy()` → fixed with isinstance check. Reason: pandas .get() requires a column name as argument, crashes without one. Fix: `data = df.copy() if isinstance(df, pd.DataFrame) else df.get().copy()`.
+
+### get_lotkalaw.py
+**Status:** PASS (both sources)
+**Patches applied:**
+1. Line 17: `data = df.get()` → fixed with isinstance check. Reason: pandas .get() requires a column name as argument, crashes without one. Fix: `data = df if isinstance(df, pd.DataFrame) else df.get()`.
+
+### get_maininformations.py
+**Status:** PASS (both sources)
+**Patches applied:**
+1. Line 10: `data = df.get()` → fixed with isinstance check. Reason: pandas .get() requires a column name as argument, crashes without one. Fix: `data = df if isinstance(df, pd.DataFrame) else df.get()`.
+
+### get_referencesspectroscopy.py
+**Status:** PASS (both sources)
+**Patches applied:**
+1. Line 21: `df = df.get()` → fixed with isinstance check. Reason: pandas .get() requires a column name as argument, crashes without one. Fix: `df = df if isinstance(df, pd.DataFrame) else df.get()`.
+2. CR list conversion: CR column entries are joined into semicolon-separated strings before processing if they are lists, as produced by the ETL pipeline.
+3. Empty table guard: if no references fall within the year range, returns `(empty FigureWidget, empty DataFrame, empty DataFrame)` gracefully instead of crashing downstream.
+
+### get_relevantaffiliations.py
+**Status:** PASS (both sources)
+**Patches applied:**
+1. `df.get()` → fixed with isinstance check. Reason: pandas .get() requires a column name as argument, crashes without one. Fix: `df.get() if hasattr(df, 'get') and callable(df.get) and not isinstance(df, pd.DataFrame) else df`.
+2. `metaTagExtraction` return handling: AU_UN is a derived field that must be extracted before use, so `metaTagExtraction(df, Field="AU_UN")` is called only when `disambiguation == "yes"`.
+3. Safety check after extraction: if `data` is None or empty, returns empty figure and empty DataFrame gracefully.
+4. Missing `AU_UN` column guard: if `AU_UN` is absent after extraction in disambiguation mode, returns empty figure and empty DataFrame gracefully.
+5. Missing `C1` column guard: if `C1` is absent in non-disambiguation mode, returns empty figure and empty DataFrame gracefully.
+6. Empty affiliations guard: if `affiliations` is empty after explode, returns empty figure and empty DataFrame gracefully.
+
+### get_relevantauthors.py
+**Status:** PASS (both sources)
+**Patches applied:**
+1. Line 14: `data = df.get()` → fixed with isinstance check. Reason: pandas .get() requires a column name as argument, crashes without one. Fix: `data = df if isinstance(df, pd.DataFrame) else df.get()`.
+2. None check before df.get(): if `df` is None, returns `(None, empty DataFrame)` gracefully.
+3. Empty data check after unwrapping: if `data` is None or empty, returns `(None, empty DataFrame)` gracefully.
+4. AU column guard: if AU is missing, fills with empty lists to avoid KeyError downstream.
+5. AU list format guard: ensures AU entries are always lists, handling string and NaN cases.
+6. Empty authors check: if no authors are found after flattening, returns `(None, empty DataFrame)` gracefully.
+
+### get_relevantsources.py
+**Status:** PASS (both sources)
+**Patches applied:**
+1. Line 17: `df.get()` → fixed with isinstance check. Reason: pandas .get() requires a column name as argument, crashes without one. Fix: `data = df if isinstance(df, pd.DataFrame) else df.get()`.
+
+### get_sourceslocalimpact.py
+**Status:** PASS (both sources)
+**Patches applied:**
+1. Line 18: `df.get()` → fixed with isinstance check. Reason: pandas .get() requires a column name as argument, crashes without one. Fix: `data = df if isinstance(df, pd.DataFrame) else df.get()`.
+2. TC and PY numeric casting: `pd.to_numeric(..., errors='coerce')` applied to both TC and PY before index calculations to avoid arithmetic errors on string values.
+
+### get_table.py
+**Status:** function uses Shiny UI components.
+**Patches applied:**
+1. Line 68: `data = df.get()` → fixed with isinstance check. Reason: pandas .get() requires a column name as argument, crashes without one. Fix: `data = df if isinstance(df, pd.DataFrame) else df.get()`.
+2. Second `df.get()` call in return statement: replaced with `data`, which is already the unwrapped DataFrame from patch 1, avoiding a redundant and potentially crashing second call.
+3. `data.map(lambda x: x == [])` → replaced with a per-column `apply` using `isinstance` check. Reason: applying a lambda cell-by-cell across the entire DataFrame raises TypeError on non-list cells (int, float) in some pandas versions. Fix: `count_empty_lists` function checks `isinstance(x, list) and len(x) == 0` safely per column.
+
+
 
 ---
 
