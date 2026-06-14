@@ -63,17 +63,9 @@ def SR(M):
     SR = FirstAuthors + ", " + M["PY"].astype(str) + ", " + J9
 
     M["SR_FULL"] = SR.str.replace(r"\s+", " ", regex=True)
-
-    st = i = 0
-    while st == 0:
-        ind = SR.duplicated()
-        if ind.any():
-            i += 1
-            SR[ind] = SR[ind] + "-" + chr(96 + i)
-        else:
-            st = 1
+   
     M["SR"] = SR.str.replace(r"\s+", " ", regex=True)
-
+    
     return M
 
 

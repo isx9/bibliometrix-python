@@ -65,13 +65,32 @@ def get_local_cited_authors(df, num_of_cited_authors, fast_search=False):
     else:
         loccit = 1
 
-    # HIST NETWORK
     H = histNetwork(
         df,
         min_citations=loccit,
         sep=";",
         network=False
     )
+
+    print("AFTER HISTNETWORK")
+    print(type(H))
+    print(H.keys() if H is not None else "H IS NONE")
+
+    print("POINT 1")
+
+    M = H['M']
+
+    print("POINT 2")
+
+    if 'LCS' not in M.columns:
+        M['LCS'] = M['TC']
+
+    print("POINT 3")
+
+    if M['LCS'].sum() == 0:
+        M['LCS'] = M['TC']
+
+    print("POINT 4")
 
     # SAFETY CHECK
     if H is None:
@@ -109,7 +128,9 @@ def get_local_cited_authors(df, num_of_cited_authors, fast_search=False):
     )
 
     # SPLIT AUTHORS
+    print("POINT 5")
     AU = M['AU'].explode()
+    print("POINT 6")
 
     # REMOVE EMPTY AUTHORS
     AU = AU[
@@ -327,16 +348,18 @@ def get_local_cited_authors(df, num_of_cited_authors, fast_search=False):
         coloraxis_showscale=False,
     )
 
-    fig = go.FigureWidget(fig)
+    fig = go.Figure(fig)
 
-    fig._config = fig._config | {
-        'modeBarButtonsToRemove': [
-            'pan',
-            'select',
-            'lasso2d',
-            'toImage'
-        ],
-        'displaylogo': False
-    }
-
+    #fig._config = fig._config | {
+    #   'modeBarButtonsToRemove': [
+    #        'pan',
+    #        'select',
+    #        'lasso2d',
+    #        'toImage'
+    #    ],
+    #    'displaylogo': False
+    #}
+    
+    print("POINT 8")
+    print(type(fig))
     return fig, table_located_authors

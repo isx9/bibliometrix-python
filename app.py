@@ -2508,26 +2508,31 @@ with ui.tags.div(id="mainContent", class_="main-content"):
 
                     with ui.navset_underline(id="most_local_cited_authors_tab"):
                         with ui.nav_panel("Plot"):
+                            @render_widget
+                            def local_cited_authors_plot():
+                                result = local_cited_authors_result.get()
+
+                                if result is None:
+                                    return None
+
+                                plot_local_cited_authors, _ = result
+                                return plot_local_cited_authors
+
+
                             @render.ui
                             def local_cited_authors_placeholder():
                                 result = local_cited_authors_result.get()
+
                                 if result is None:
                                     return ui.tags.div(
-                                        ui.p("Click the Run Analysis button to generate the most local cited authors visualization.", style="text-align: center; color: #666; font-size: 16px;"),
+                                        ui.p(
+                                            "Click the Run Analysis button to generate the most local cited authors visualization.",
+                                            style="text-align: center; color: #666; font-size: 16px;"
+                                        ),
                                         style="height: 400px; display: flex; flex-direction: column; justify-content: center; align-items: center; border: 2px dashed #ddd; border-radius: 10px; margin: 20px;"
                                     )
-                                # Render the widget directly when result is available
-                                plot_local_cited_authors, _ = result
-                                return plot_local_cited_authors
-                            
-                            @render_widget
-                            def show_local_cited_authors():
-                                result = local_cited_authors_result.get()
-                                if result is None:
-                                    return None
-                                plot_local_cited_authors, _ = result
-                                return plot_local_cited_authors
-                        
+
+                                return ui.output_widget("local_cited_authors_plot")
                         with ui.nav_panel("Table"):
                             @render.ui
                             def table_local_cited_authors():
