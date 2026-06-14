@@ -1557,15 +1557,15 @@ with ui.tags.div(id="mainContent", class_="main-content"):
                         with ui.accordion(id="acc_tfp", multiple=True, open=False):
                             with ui.accordion_panel("Middle Field"):
                                 with ui.layout_column_wrap(width=1 / 2):
-                                    ui.input_select("middle_field", "Field:", field_options, selected=list(field_options.keys())[0])
+                                    ui.input_select("middle_field", "Field:", field_options, selected="AU")
                                     ui.input_numeric("middle_field_items", "Items:", value=20)
                             with ui.accordion_panel("Left Field"):   
                                 with ui.layout_column_wrap(width=1 / 2):
-                                    ui.input_select("left_field", "Field:", field_options, selected=list(field_options.keys())[1])
+                                    ui.input_select("left_field", "Field:", field_options, selected="SO")
                                     ui.input_numeric("left_field_items", "Items:", value=20)
                             with ui.accordion_panel("Right Field"):    
                                 with ui.layout_column_wrap(width=1 / 2):
-                                    ui.input_select("right_field", "Field:", field_options, selected=list(field_options.keys())[2])
+                                    ui.input_select("right_field", "Field:", field_options, selected="DE")
                                     ui.input_numeric("right_field_items", "Items:", value=20)
 
                     # Store the three field plot results

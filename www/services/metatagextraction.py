@@ -1,3 +1,4 @@
+import pandas as pd
 from .utils import *
 
 
@@ -8,7 +9,7 @@ def metaTagExtraction(df, Field="AU_CO", sep=";", aff_disamb=False):
     """
 
     # PATCH: support both Shiny reactive.Value and pandas DataFrame
-    if hasattr(df, "get"):
+    if hasattr(df, "get") and callable(df.get) and not isinstance(df, pd.DataFrame):
         M = df.get().copy()
     else:
         M = df.copy()

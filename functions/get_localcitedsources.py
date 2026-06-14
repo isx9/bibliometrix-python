@@ -7,7 +7,8 @@ def get_local_cited_sources(df, num_of_cited_sources):
     """
 
     df = metaTagExtraction(df, "CR_SO")
-    data = df.get().copy()
+    data = df.copy()
+
 
     # Ensure CR_SO exists
     if "CR_SO" not in data.columns:

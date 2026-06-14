@@ -48,13 +48,17 @@ def get_local_cited_authors(df, num_of_cited_authors, fast_search=False):
     ).fillna(0)
 
     # SAFE AUTHOR FORMAT
-    M['AU'] = M['AU'].apply(
-        lambda x: x
-        if isinstance(x, list)
-        else [i.strip() for i in str(x).split(";")] if pd.notna(x)
-        else []
-    )
+    import ast
 
+    M['AU'] = M['AU'].apply(
+    lambda x:
+    x if isinstance(x, list)
+    else ast.literal_eval(x)
+         if isinstance(x, str) and x.startswith("[")
+         else [i.strip() for i in str(x).split(";")]
+         if pd.notna(x)
+         else []
+)
     # LOCAL CITATION THRESHOLD
     if fast_search:
         loccit = M['TC'].quantile(0.75)
@@ -75,9 +79,14 @@ def get_local_cited_authors(df, num_of_cited_authors, fast_search=False):
 
     # PATCH: if all LCS are 0 (common with OpenAlex due to URL-based references),
     # return empty result immediately instead of hanging.
-    M = H['M']
-    if 'LCS' not in M.columns or M['LCS'].sum() == 0:
-        return None, pd.DataFrame()
+        M = H['M']
+
+        # OpenAlex fallback
+    if 'LCS' not in M.columns:
+        M['LCS'] = M['TC']
+
+    if M['LCS'].sum() == 0:
+        M['LCS'] = M['TC']
 
     # ENSURE REQUIRED OUTPUT COLUMNS
     required_output_cols = ['AU', 'LCS']

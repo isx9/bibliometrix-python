@@ -6,7 +6,11 @@ from .cocmatrix import *
 
 def histNetwork(df, min_citations=0, sep=";", network=True):
 
-    M = df.get()
+    # Support both pandas DataFrame and Shiny reactive.Value
+    if hasattr(df, "get") and not isinstance(df, pd.DataFrame):
+        M = df.get().copy()
+    else:
+        M = df.copy()
 
     # SAFETY CHECK
     if M is None or M.empty:
