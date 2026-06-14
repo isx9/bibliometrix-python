@@ -380,8 +380,94 @@ dataset), making the pipeline impractical and likely to hit  rate limits.
 2. Second `df.get()` call in return statement: replaced with `data`, which is already the unwrapped DataFrame from patch 1, avoiding a redundant and potentially crashing second call.
 3. `data.map(lambda x: x == [])` → replaced with a per-column `apply` using `isinstance` check. Reason: applying a lambda cell-by-cell across the entire DataFrame raises TypeError on non-list cells (int, float) in some pandas versions. Fix: `count_empty_lists` function checks `isinstance(x, list) and len(x) == 0` safely per column.
 
+### get_thematicevolution.py
+**Status:** PASS (both sources)
+**Patches applied:**
+1. Lines 93–98: removed `reactive.Value(Mk)` wrapper — passing `Mk` directly to `thematic_map`. Reason: `reactive.Value` is a Shiny-specific object that crashes outside a running Shiny application with "No current reactive context". `thematic_map` already handles plain DataFrames via its own isinstance check.
+2. Lines 87–88: added early return when `timeslice` returns empty dict. Reason: `timeslice` returns `{}` when PY is all NaN (PubMed), causing the subsequent `for` loop to silently skip and `results` to be None, crashing on `results['Nodes']` downstream.
+3. Line 45: added None check on `results` after `thematic_evolution` call. Reason: `thematic_evolution` returns None when PY is all NaN or no topics are found — accessing `results['Nodes']` on None crashes with TypeError.
+4. `timeslice` — NaN PY guard: if PY is entirely NaN, return `{}` gracefully instead of crashing in `pd.cut`.
+5. `timeslice` — dropna before `pd.cut`: drop rows with NaN PY before cutting to avoid non-monotonic bin errors.
+6. `timeslice` — sorted breaks: wrap user-provided breaks with `sorted(set(...))` to guarantee monotonic order regardless of whether user-provided years fall outside the actual PY range of the data.
+7. `normalize_to_minus1_1`: if all values are equal, return zeros instead of dividing by zero (range = 0 produces NaN everywhere).
+8. `resk_tuple` unpacking: `thematic_map` returns exactly 5 values; original code tried to access index 5 which is always out of range.
+9. `nclust` derivation: derived directly from `clusters` DataFrame row count instead of always being None.
+10. `inc_matrix` accumulation: moved `pd.concat` and downstream processing outside the loop so all periods are accumulated before building the final result.
+**Known limitations:**
+- PubMed: PY is all NaN (eSummary pubdate field does not reliably parse to a 4-digit year), function returns `(None, empty DataFrame, None)` gracefully
+- OpenAlex: DE keywords are sparse, thematic evolution output may be minimal depending on the year range chosen
+
+### get_thematicmap.py
+**Status:** PASS (both sources)
+**Patches applied:**
+1. None check on `thematic_map` return value: `thematic_map` returns `None` when `NetMatrix` is empty — unpacking directly would crash with `TypeError: cannot unpack non-iterable NoneType`. Fix: capture full result first, check for None, return safe empty tuple before unpacking.
+2. Variable rename: `map` shadowed the Python builtin `map()` function — renamed to `thematic_map_result` to avoid the collision.
+
+### get_threefieldplot.py
+**Status:** PASS (both sources)
+**Patches applied:**
+1. None/empty check after each `cocMatrix` call: `cocMatrix` returns None when the field is empty (e.g. PubMed DE is always empty from eSummary API) — accessing `.shape` on None crashes with AttributeError. Fix: return empty `FigureWidget` gracefully if any of the three matrices is None or empty.
+2. early return when `n1`, `n2`, or `n3` is 0: if `cocMatrix` returns an empty DataFrame for any field, reassigning `LM.index`/`columns` with a mismatched range crashes with `ValueError: Length mismatch`. Fix: return empty `FigureWidget` early.
+3. opacity normalization guard: original guard checked `weight_max > 0` but not `weight_max != weight_min` — if all nodes share the same weight, `max - min` is 0 and normalization produces NaN in every opacity value. Fix: added second condition to ensure range is non-zero before dividing, falling back to `min_opacity` for all nodes.
+4. solated node remapping: if `id_map` does not cover all values in `Edges['from']` or `Edges['to']`, `.map()` produces NaN — the Sankey crashes with float indices instead of int. Fix: drop edges whose endpoints are not in `id_map` before remapping, then cast to int.
+
+### get_treemap.py
+**Status:** PASS (both sources)
+**Patches applied:**
+1. `table_tag` — `df.get()` → fixed with isinstance check. Reason: pandas .get() requires a column name as argument, crashes without one. Fix: `df.get() if hasattr(df, 'get') and callable(df.get) and not isinstance(df, pd.DataFrame) else df`.
+2. `table_tag` — plain DataFrame passed to `term_extraction`: `term_extraction` does not accept Shiny reactive objects — extract plain DataFrame before passing for AB/TI fields.
+3. `table_tag` — list filter before iterating: for non-DE/ID fields, added `isinstance(sublist, list)` check before iterating to avoid `TypeError` when sublist is a string or NaN.
+4. `table_tag` — `remove_terms` applied to all tags: original code only applied `remove_terms` for some tags. Fix: apply `remove_terms` filter to the final `word_counts` dict regardless of tag.
+5. `get_treemap` — safety check on empty `word_counts`: if `table_tag` returns an empty dict (e.g. PubMed DE is always empty), `word_counts` DataFrame is empty and `px.treemap` crashes. Fix: return empty `FigureWidget` and empty table gracefully.
+
+### get_trendtopics.py
+**Status:** PASS (both sources)
+**Patches applied:**
+1. `get_trend_topics` — isinstance check for `df.get()`: extract plain DataFrame before passing to `term_extraction` — it does not accept Shiny reactive objects.
+2. `get_trend_topics` — empty result guard: if `field_by_year` returns None or empty DataFrame, return empty `FigureWidget` and empty DataFrame gracefully instead of crashing on `px.scatter`.
+3. `field_by_year` — isinstance check for `df.get()`: same pattern — unwrap reactive or use plain DataFrame directly.
+4. `field_by_year` — `cocMatrix` None/empty guard: `cocMatrix` returns None when the field is empty (e.g. PubMed DE is always empty) — return empty DataFrame gracefully.
+5. `field_by_year` — PY numeric conversion: PY is stored as string in ETL output — convert to numeric with `pd.to_numeric(..., errors='coerce')` before passing to `np.quantile` to avoid `TypeError: unsupported operand type(s) for -: 'str' and 'str'`.
+6. `field_by_year` — `safe_quantile` empty array guard: if `np.repeat` produces an empty array (zero-frequency term), return `[nan, nan, nan]` gracefully instead of crashing in `np.quantile`.
+7. `field_by_year` — `timespan` type guard: `timespan` may be passed as an integer (`time_window`) rather than a `[start, end]` list — `len()` on an int crashes with `TypeError`. Fix: check `isinstance(timespan, (list, tuple))` before calling `len()`, fall back to data range if not a valid list.
+
+### get_wordcloud.py
+**Status:** PASS (both sources)
+**Patches applied:**
+1. `table_tag` — isinstance check for `df.get()`: unwrap Shiny reactive or use plain DataFrame directly. Reason: pandas `.get()` requires a column name as argument, crashes without one.
+2. `table_tag` — plain DataFrame passed to `term_extraction`: `term_extraction` does not accept Shiny reactive objects — extract plain DataFrame before passing for AB/TI fields.
+3. `table_tag` — list filter before iterating: for non-DE/ID fields, added `isinstance(sublist, list)` check before iterating to avoid `TypeError` when sublist is a string or NaN.
+4. `table_tag` — `remove_terms` applied to all tags: original code only applied `remove_terms` for some tags. Fix: apply `remove_terms` filter to the final `word_counts` dict regardless of tag.
+5. `get_wordcloud` — empty word list guard: if `sorted_words` is empty (e.g. PubMed DE is always empty), write a minimal HTML file and return gracefully instead of crashing downstream.
+
+### get_wordfrequency.py
+**Status:** PASS (both sources)
+**Patches applied:**
+1. `get_word_frequency` — isinstance check for `df.get()`: extract plain DataFrame before passing to `term_extraction` — it does not accept Shiny reactive objects.
+2. `get_word_frequency` — `term_extraction` empty vocabulary guard: `term_extraction` crashes with `ValueError: empty vocabulary` when the field column is entirely empty (e.g. PubMed DE is always empty from eSummary API). Fix: wrap in try/except and return empty `FigureWidget` and empty DataFrame gracefully.
+3. `get_word_frequency` — empty TM column guard: if `term_extraction` succeeds but the TM column contains no terms, return empty results gracefully.
+4. `get_word_frequency` — `top_words` type normalization: `top_words` may be passed as a plain int rather than a `[start, end]` list — indexing an int crashes with `TypeError`. Fix: normalize to `[0, n]` if a plain int is given.
+5. `get_word_frequency` — PATCH 2: column slice bounds clamping: if `top_words[0]` >= number of available columns, slicing crashes with `IndexError`. Fix: clamp start and end to valid range before slicing.
+6. `keyword_growth` — PATCH 3: empty data guard: if data is empty after filtering, `data['Year'].min()` returns NaN and `range(NaN, NaN)` crashes with `TypeError`. Fix: return empty DataFrame with just a Year column.
+7. `keyword_growth` — PATCH 4: safe split with type check: iterating over elements without type checking crashes with `TypeError` on non-string/non-list elements. Fix: `safe_split` returns empty list for unexpected types.
+8. `trim_years` — PATCH 5: empty year range guard: if `year_range` is empty, return empty Series immediately instead of producing inconsistent results.
 
 
+### get_worldmapcollaboration.py
+**Status:** PASS (both sources)
+**Patches applied:**
+1. `metaTagExtraction` return handling: after calling `metaTagExtraction(df, "AU_CO")`, unwrap result with isinstance check — `metaTagExtraction` may return a Shiny reactive or a plain DataFrame.
+2. AU_CO safe fill: `fillna("")` applied before exploding AU_CO to avoid NaN propagation when AU_CO is missing or empty.
+3. Country normalization: corrections dict maps common abbreviations (USA, UK, SOUTH KOREA) to standardized names used in the world geometry dataset.
+4. Network None/empty guard: if `biblionetwork` returns None or an empty result, return empty `FigureWidget` and empty DataFrame gracefully.
+5. Safe centroid computation: Longitude and Latitude converted with `pd.to_numeric(..., errors='coerce').fillna(0)` to avoid NaN coordinates crashing edge drawing.
+6. Manual coordinate fixes for UK and France (centroid falls in the ocean or overseas territories).
+7. Singapore patch: Singapore is absent from the 110m Natural Earth dataset — added manually with hardcoded coordinates.
+8. Safe edge width: `max(row['count'], 1)` prevents division by zero when computing edge width.
+**Known limitations:**
+- AU_CO is a derived column not produced by the ETL pipeline — `metaTagExtraction` cannot extract it from OpenAlex or PubMed data, so the collaboration map always returns an empty figure for both sources
+
+  
 ---
 
 
