@@ -467,6 +467,19 @@ dataset), making the pipeline impractical and likely to hit  rate limits.
 **Known limitations:**
 - AU_CO is a derived column not produced by the ETL pipeline — `metaTagExtraction` cannot extract it from OpenAlex or PubMed data, so the collaboration map always returns an empty figure for both sources
 
+### get_citeddocuments.py
+**Status:** PASS (both sources)
+**Patches applied:**
+1. `data = df.get()` → fixed with isinstance check. Reason: pandas .get() requires a column name as argument, crashes without one. Fix: `data = df if isinstance(df, pd.DataFrame) else df.get()`.
+2. None check before unwrapping: if `df` is None, returns `(None, empty DataFrame)` gracefully.
+3. Empty data check after unwrapping: if `data` is None or empty, returns `(None, empty DataFrame)` gracefully.
+4. Required columns guard: if SR, TC, or PY are missing, fills with safe defaults (0 for numeric, "" for strings).
+5. TC and PY numeric conversion: `pd.to_numeric(..., errors='coerce')` applied to both to avoid arithmetic errors on string values.
+6. Division by zero prevention in TCperYear: `max((current_year + 1 - row['PY']), 1)` prevents division by zero for documents with missing or future PY.
+7. Safe normalization: NormalizedTC groupby transform checks for zero or NaN mean before dividing.
+8. Empty tab guard: if groupby aggregation produces an empty table, returns `(None, empty DataFrame)` gracefully.
+
+
   
 ---
 
