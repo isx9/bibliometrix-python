@@ -479,7 +479,15 @@ dataset), making the pipeline impractical and likely to hit  rate limits.
 7. Safe normalization: NormalizedTC groupby transform checks for zero or NaN mean before dividing.
 8. Empty tab guard: if groupby aggregation produces an empty table, returns `(None, empty DataFrame)` gracefully.
 
-
+### get_sourcesproduction.py
+**Status:** PASS (both sources)
+**Patches applied:**
+1. Line 18: `data = df.get()` → fixed with isinstance check. Reason: pandas .get() requires a column name as argument, crashes without one. Fix: `data = df if isinstance(df, pd.DataFrame) else df.get()`.
+2. PY string extraction for `data["PY"]`: PubMed PY may contain full date strings (e.g. "2026 Jun 6") instead of plain year integers — `astype(int)` crashes on these. Fix: extract first 4-digit year with `str.extract(r'(\d{4})')` and `pd.to_numeric` before casting to int. Rows with unparseable PY are dropped.
+3. WPY column name extraction for missing years: `WPY.columns` may also contain full date strings — extract 4-digit year from column names before comparing against the PY range to compute missing years.
+4. WPY column renaming before sort: `WPY.columns.astype(int)` crashes on full date strings. Fix: rename columns by extracting the first 4 characters as a year string, then sort using a safe `int(x) if x.isdigit() else 0` key.
+**Known limitations:**
+- PubMed: PY field from eSummary API returns full date strings (e.g. "2026 Jun 6") rather than 4-digit years — year extraction is required before any arithmetic on PY
   
 ---
 
