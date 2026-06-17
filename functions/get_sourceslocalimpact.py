@@ -13,13 +13,17 @@ def get_sources_local_impact(df, num_of_sources_local_impact, source_local_impac
     Returns:
         A Plotly figure object and a DataFrame of the most impactful sources.
     """
-    df = df.get()
+    # PATCH: original code called df.get() without arguments, which crashes on a
+    # plain pandas DataFrame because pandas .get() requires a column name as argument.
+    # Fixed by checking isinstance(df, pd.DataFrame) first.
+    data = df if isinstance(df, pd.DataFrame) else df.get()
+    
     today = pd.Timestamp.now().year
 
     # Ensure 'TC' and 'PY' are numeric
-    df['TC'] = pd.to_numeric(df['TC'], errors='coerce')
-    df['PY'] = pd.to_numeric(df['PY'], errors='coerce')
-    df = df.dropna(subset=['TC', 'PY'])
+    data['TC'] = pd.to_numeric(data['TC'], errors='coerce')
+    data['PY'] = pd.to_numeric(data['PY'], errors='coerce')
+    data = data.dropna(subset=['TC', 'PY'])
 
     # Define h-index and g-index calculation functions
     def h_calc(x):
@@ -44,15 +48,15 @@ def get_sources_local_impact(df, num_of_sources_local_impact, source_local_impac
         return g
 
     # Calculate indices
-    df['h_index'] = df.groupby('SO')['TC'].transform(h_calc)
-    df['g_index'] = df.groupby('SO')['TC'].transform(g_calc)
-    df['PY_start'] = df.groupby('SO')['PY'].transform('min')
-    df['m_index'] = df['h_index'] / (today - df['PY_start'] + 1)
-    df['NP'] = df.groupby('SO')['SO'].transform('size')
-    df['TC_sum'] = df.groupby('SO')['TC'].transform(lambda x: x.sum())
+    data['h_index'] = data.groupby('SO')['TC'].transform(h_calc)
+    data['g_index'] = data.groupby('SO')['TC'].transform(g_calc)
+    data['PY_start'] = data.groupby('SO')['PY'].transform('min')
+    data['m_index'] = data['h_index'] / (today - data['PY_start'] + 1)
+    data['NP'] = data.groupby('SO')['SO'].transform('size')
+    data['TC_sum'] = data.groupby('SO')['TC'].transform(lambda x: x.sum())
 
     # Select the top sources
-    top_sources = df.groupby('SO').first().reset_index()
+    top_sources = data.groupby('SO').first().reset_index()
     #top_sources = top_sources.nlargest(num_of_sources_local_impact, impact_column)
 
     # Prepare the final table

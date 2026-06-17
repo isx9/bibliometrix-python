@@ -13,7 +13,10 @@ def get_local_cited_refs(df, num_of_cited_refs, field_separator):
     Returns:
         A Plotly figure object and a DataFrame of the most local cited sources.
     """
-    data = df.get()
+    # PATCH: original code called df.get() without arguments, which crashes on a
+    # plain pandas DataFrame because pandas .get() requires a column name as argument.
+    # Fixed by checking isinstance(df, pd.DataFrame) first.
+    data = df if isinstance(df, pd.DataFrame) else df.get()
     
     if isinstance(data["CR"].iloc[0], list):  # Check if the first element is a list
         # Flatten the 'CR' column containing lists
@@ -30,6 +33,11 @@ def get_local_cited_refs(df, num_of_cited_refs, field_separator):
 
     # Filter out unwanted references
     source_counts = source_counts[source_counts["Cited References"] != "ANONYMOUS, NO TITLE CAPTURED"]
+    # PATCH: PubMed CR is empty (eSummary API returns no references) — return
+    # empty results gracefully instead of crashing on NaN max_x downstream.
+    if source_counts.empty:
+        empty_df = pd.DataFrame(columns=["Cited References", "Citations"])
+        return go.Figure(), empty_df
 
     # Limit the number of sources to display
     if num_of_cited_refs > len(source_counts):

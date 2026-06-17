@@ -106,6 +106,12 @@ def get_cited_countries(df, num_of_cited_countries, cited_countries_measure):
         )
 
     # Set x-axis ticks
+    # PATCH: if no countries found (e.g. PubMed has no affiliation data),
+    # x_values will be empty and max_x will be NaN, causing int() conversion
+    # to crash. Return empty figure instead.
+    if x_values.empty or pd.isna(x_values.max()):
+        return go.FigureWidget(go.Figure()), pd.DataFrame()
+
     max_x = x_values.max()
     tick_step = 5 if max_x <= 50 else int(max_x // 10) or 1
     x_ticks = list(range(0, int(max_x) + tick_step, tick_step))

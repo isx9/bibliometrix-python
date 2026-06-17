@@ -42,6 +42,11 @@ def get_thematic_evolution(df, field="ID", years=None, n=250, weight_index="inc_
         cluster=cluster
     )
 
+    # PATCH: thematic_evolution returns None when PY is all NaN (e.g. PubMed)
+    # or when no topics are found — return empty results gracefully.
+    if results is None:
+        return None, pd.DataFrame(), None
+    
     nodes = results['Nodes']
     edges = results['Edges']
     label_size = int(size * 20)
@@ -85,17 +90,18 @@ def thematic_evolution(M, field="ID", years=None, n=250, min_freq=2, size=0.5, n
         raise ValueError("You must provide a list of years for thematic evolution analysis.")
 
     list_df = timeslice(M, breaks=years)
+    # PATCH: timeslice returns empty dict when PY is all NaN (e.g. PubMed)
+    if not list_df:
+        return None
     net, res = [], []
     Y = []
 
     for interval_label, Mk in list_df.items():
         Y.append(f"{min(Mk['PY'])}-{max(Mk['PY'])}")
-        # PATCH: thematic_map handles both reactive and plain DataFrames internally
-        # wrapping in reactive.Value is no longer needed
-        Mk_reactive = reactive.Value(Mk)
+
 
         resk_tuple = thematic_map(
-            Mk_reactive ,
+            Mk,
             field=field, n=n, minfreq=min_freq, ngrams=ngrams,
             stemming=stemming, size=size, n_labels=n_labels,
             repel=repel, remove_terms=remove_terms, synonyms=synonyms,
@@ -298,11 +304,22 @@ def timeslice(M, breaks=None, k=5):
 
     M['PY'] = pd.to_numeric(M['PY'], errors='coerce')
 
+    # PATCH: if PY is entirely NaN (e.g. PubMed pubdate parsing failure),
+    # cannot build bins — return empty dict gracefully.
+    if M['PY'].isna().all():
+        print("No valid PY values found. Cannot split into time slices.")
+        return {}
+
     if breaks is None or (isinstance(breaks, list) and len(breaks) == 0):
         breaks = np.floor(np.linspace(M['PY'].min() - 1, M['PY'].max(), k + 1))
     else:
         breaks = [M['PY'].min() - 1] + breaks + [M['PY'].max()]
-
+        print("breaks:", breaks)
+        M = M.dropna(subset=['PY'])
+        M['interval'] = pd.cut(M['PY'], bins=breaks, right=False)
+    
+    # PATCH: drop NaN PY rows before cutting to avoid non-monotonic bin errors.
+    M = M.dropna(subset=['PY'])
     M['interval'] = pd.cut(M['PY'], bins=breaks, right=False)
 
     intervals = M['interval'].cat.categories

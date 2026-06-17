@@ -16,7 +16,13 @@ def get_author_production_over_time(df, top_k_authors):
         table_authors_production (pd.DataFrame): Table summarizing authors' production with TC and TCpY.
         table_documents (pd.DataFrame): Detailed table with additional document information.
     """
-    data = df.get()
+    # PATCH: original code called df.get() without arguments, which crashes
+    # on a pandas DataFrame because pandas .get() requires a column name.
+    # Fixed by checking isinstance(df, pd.DataFrame) first.
+    if isinstance(df, pd.DataFrame):
+        data = df.copy()
+    else:
+        data = df.get()
 
     # Ensure "PY" is numeric
     data["PY"] = pd.to_numeric(data["PY"], errors="coerce")

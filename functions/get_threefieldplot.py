@@ -31,18 +31,27 @@ def get_three_field_plot(df, left_field, middle_field, right_field, left_field_i
     if "TI_TM" in fields:
         df = term_extraction(df, field="TI")
 
+    # PATCH: cocMatrix returns None when the field is empty (e.g. PubMed DE is
+    # always empty from eSummary API) — accessing .shape on None crashes with
+    # AttributeError. Return an empty figure gracefully if any matrix is None or empty.
     # Document x Attribute matrix — LEFT field
     WL = cocMatrix(df, fields[0], binary=True, n=n[0])
+    if WL is None or WL.empty:
+        return go.FigureWidget(go.Figure())
     n1 = min(n[0], WL.shape[1])
     TopL = WL.columns.tolist()
 
     # Document x Attribute matrix — MIDDLE field
     WM = cocMatrix(df, fields[1], binary=True, n=n[1])
+    if WM is None or WM.empty:
+        return go.FigureWidget(go.Figure())
     n2 = min(n[1], WM.shape[1])
     TopM = WM.columns.tolist()
 
     # Document x Attribute matrix — RIGHT field
     WR = cocMatrix(df, fields[2], binary=True, n=n[2])
+    if WR is None or WR.empty:
+        return go.FigureWidget(go.Figure())
     n3 = min(n[2], WR.shape[1])
     TopR = WR.columns.tolist()
 
@@ -97,7 +106,9 @@ def get_three_field_plot(df, left_field, middle_field, right_field, left_field_i
 
     Kx = len(Nodes['group'].unique())
     Ky = len(Nodes)
-    Nodes['coordX'] = np.repeat(np.linspace(0, 1, Kx), Nodes['level'].value_counts().sort_index().values)
+    level_counts = Nodes['level'].value_counts().sort_index()
+    Kx = len(level_counts)
+    Nodes['coordX'] = np.repeat(np.linspace(0, 1, Kx), level_counts.values)
     Nodes['coordY'] = np.repeat(0.1, Ky)
 
     group_colors = {

@@ -12,9 +12,15 @@ def get_local_cited_documents(df, num_of_local_cited_docs, field_separator, fast
         return None, pd.DataFrame()
 
     # ENSURE SR EXISTS
-    df = metaTagExtraction(df, "SR")
+    _df = df.get() if hasattr(df, 'get') and not isinstance(df, pd.DataFrame) else df
+    if 'SR' not in _df.columns or _df['SR'].eq('').all():
+        df = metaTagExtraction(df, "SR")
 
-    M = df.get()
+    # PATCH: metaTagExtraction may return a reactive or a plain DataFrame
+    # pandas .get() requires a column name as argument, crashes without one
+    # Fix: isinstance check — if it's a DataFrame use it directly,
+    # if it's a Shiny reactive object use .get() to unwrap it
+    M = df if isinstance(df, pd.DataFrame) else df.get()
 
     # EMPTY CHECK
     if M is None or M.empty:

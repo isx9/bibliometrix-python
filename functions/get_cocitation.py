@@ -12,6 +12,8 @@ def get_co_citation(
     """
 
     M = df
+    M = M.get() if hasattr(M, 'get') and callable(M.get) and not isinstance(M, pd.DataFrame) else M
+    print("M type:", type(M))
 
     # Validate field
     valid_fields = ["CR", "CR_AU", "CR_SO"]
@@ -38,6 +40,7 @@ def get_co_citation(
                 n=citNodes,
                 sep=sep
             )
+            print("NetRefs result:", NetRefs)
 
             Title = "Cited References network"
 
@@ -106,6 +109,13 @@ def get_co_citation(
                 pd.DataFrame(),
                 go.FigureWidget(go.Figure())
             )
+        if NetRefs.shape[0] < 2:
+            print("Co-citation network too small to build (less than 2 nodes)")
+            return (None, 
+                    go.FigureWidget(go.Figure()),
+                    pd.DataFrame(),
+                    go.FigureWidget(go.Figure())
+                   )
 
     # Safe label calculation
     label_n = min(citNodes, citlabelsize)

@@ -12,7 +12,13 @@ def get_filters(df):
     Returns:
         A DataFrame with additional columns for filters and metrics.
     """
-    data = df.get()
+    # PATCH: original code called df.get() without arguments, which crashes
+    # on a pandas DataFrame because pandas .get() requires a column name.
+    # Fixed by checking isinstance(df, pd.DataFrame) first.
+    if isinstance(df, pd.DataFrame):
+        data = df.copy()
+    else:
+        data = df.get()
     data["PY"] = pd.to_numeric(data["PY"], errors="coerce").fillna(0).astype(int)  # PATCH: ensure PY is numeric
     data["TC"] = pd.to_numeric(data["TC"], errors="coerce").fillna(0).astype(int)  # PATCH: ensure TC is numeric
 

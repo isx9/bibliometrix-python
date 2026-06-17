@@ -1,5 +1,6 @@
 
 from www.services import *
+import ast
 
 
 def get_references_spectroscopy(df, start_year, end_year=2005, field_separator_spec=';'):
@@ -18,17 +19,31 @@ def get_references_spectroscopy(df, start_year, end_year=2005, field_separator_s
         cr_table (pd.DataFrame): Table of cited references with local citation counts and Google Scholar links.
     """
 
-    df = df.get()
+    # PATCH: original code called df.get() without arguments, which crashes on a
+    # plain pandas DataFrame because pandas .get() requires a column name as argument.
+    # Fixed by checking isinstance(df, pd.DataFrame) first.
+    df = df if isinstance(df, pd.DataFrame) else df.get()
+    
     # PATCH: if CR contains lists (as produced by the ETL pipeline),
     # join them into semicolon-separated strings before processing.
-    df['CR'] = df['CR'].apply(
-    lambda x: field_separator_spec.join(x) if isinstance(x, list) else (x or ""))
+    def _parse_cr(x):
+        if isinstance(x, list):
+            return x
+        if isinstance(x, str) and x.strip().startswith('['):
+            try:
+                return ast.literal_eval(x)
+            except:
+                pass
+        return [i.strip() for i in str(x).split(field_separator_spec) if i.strip()]
+
+    df['CR'] = df['CR'].apply(_parse_cr)
+    df['CR'] = df['CR'].apply(lambda x: field_separator_spec.join(x) if isinstance(x, list) else (x or ""))
 
     # ---------------- SAFE CR PATCH ----------------
     c_references = df['CR'].fillna("").astype(str)
 
     c_references = c_references.apply(
-        lambda x: [i for i in x] if len(x) > 0 else []
+        lambda x: [x] if len(x) > 0 else []
     ).explode()
 
     c_references = c_references.astype(str).str.replace(

@@ -15,7 +15,9 @@ def couplingMap(df, analysis="documents", field="CR", n=500, minfreq=5,
         print('\nanalysis argument is incorrect.\n\nPlease select one of the following choices: "documents", "authors", "sources"\n\n')
         return None
 
-    df = metaTagExtraction(df, "SR")
+    _df_check = df.get() if hasattr(df, 'get') and callable(df.get) and not isinstance(df, pd.DataFrame) else df
+    if 'SR' not in _df_check.columns or _df_check['SR'].eq('').all():
+        df = metaTagExtraction(df, "SR")
     M = df.get() if hasattr(df, 'get') and callable(df.get) and not isinstance(df, pd.DataFrame) else df
 
     ngrams = int(ngrams)
@@ -51,6 +53,7 @@ def couplingMap(df, analysis="documents", field="CR", n=500, minfreq=5,
     NCS[analysis] = NCS[analysis].astype(str).str.upper()
     L[analysis] = L[analysis].astype(str).str.upper()
 
+
     D = L.merge(NCS, left_on=analysis, right_on=analysis, how='left', copy=True)
 
     label = pd.Series(net.vs['name'])
@@ -62,6 +65,8 @@ def couplingMap(df, analysis="documents", field="CR", n=500, minfreq=5,
     L = pd.DataFrame({'id': label.str.lower()})
     L.columns = [analysis]
     Net['cluster_res'] = Net['cluster_res'].rename(columns={'vertex': analysis})
+    Net['cluster_res'][analysis] = Net['cluster_res'][analysis].astype(str).str.lower()
+    L[analysis] = L[analysis].astype(str).str.lower()
     C = L.merge(Net['cluster_res'], on=analysis, how='left', copy=True)
     
     group = Net['cluster_obj'].membership
@@ -102,6 +107,7 @@ def couplingMap(df, analysis="documents", field="CR", n=500, minfreq=5,
     df = df[df['freq'] >= minfreq]
 
     # PATCH: if df is empty after frequency filter, return None
+
     if df.empty:
         print("No clusters passed the frequency filter.")
         return None
@@ -116,7 +122,8 @@ def couplingMap(df, analysis="documents", field="CR", n=500, minfreq=5,
 
     if label_term is None:
         label_term = "null"
-    if label_term in ["DE", "ID", "TI", "AB"]:
+    db_val = M['DB'].iloc[0] if 'DB' in M.columns and not M.empty else ''
+    if label_term in ["DE", "ID", "TI", "AB"] and str(db_val).upper() not in ("OPENALEX", "PUBMED"):
         w = labeling(M, df_lab, term=label_term, n=n, n_labels=n_labels, analysis=analysis, ngrams=ngrams)
         df['label'] = w
 
@@ -314,7 +321,11 @@ def normalizeCitationScore(df, field="documents", impact_measure="local"):
         })
 
     elif field == "authors":
-        df['AU'] = df['AU'].fillna('').str.split(';')
+        df['AU'] = df['AU'].apply(
+            lambda x: x if isinstance(x, list)
+            else [i.strip() for i in str(x).split(';')] if pd.notna(x) and x != ''
+            else []
+        )
         exploded = df.explode('AU').assign(AU=lambda x: x['AU'].str.strip())
 
         NCS = (
@@ -358,7 +369,7 @@ def network(df, analysis, field, stemming, n, cluster, community_repulsion):
     
     if analysis == "documents":
         if field == "CR":
-            NetMatrix = biblionetwork(df, analysis="coupling", network="references", short=True, shortlabel=False, sep=";")
+            NetMatrix = biblionetwork(df_plain, analysis="coupling", network="references", short=True, shortlabel=False, sep=";")
         else:
             if field in ["TI", "AB"]:
                 df_plain = term_extraction(df_plain, field=field, verbose=False, stemming=stemming)
@@ -366,14 +377,14 @@ def network(df, analysis, field, stemming, n, cluster, community_repulsion):
     
     elif analysis == "authors":
         if field == "CR":
-            NetMatrix = biblionetwork(df, analysis="coupling", network="authors", short=True)
+            NetMatrix = biblionetwork(df_plain, analysis="coupling", network="authors", short=True)
         else:
             if field in ["TI", "AB"]:
                 df_plain = term_extraction(df_plain, field=field, verbose=False, stemming=stemming)
     
     elif analysis == "sources":
         if field == "CR":
-            NetMatrix = biblionetwork(df, analysis="coupling", network="sources", short=True)
+            NetMatrix = biblionetwork(df_plain, analysis="coupling", network="sources", short=True)
         else:
             if field in ["TI", "AB"]:
                 df_plain = term_extraction(df_plain, field=field, verbose=False, stemming=stemming)
@@ -407,9 +418,11 @@ def labeling(df, df_lab, term, n, n_labels, analysis, ngrams):
         term = f"{term}_TM"
 
     df_lab = df_lab.apply(lambda x: x.astype(str).str.upper().str.strip())
-    df = df.apply(lambda x: x.astype(str).str.upper().str.strip())
+    df = df.apply(lambda x: x.str.upper().str.strip() if x.dtype == object and not x.apply(lambda v: isinstance(v, list)).any() else x)
 
     if analysis == "documents":
+        df['SR'] = df['SR'].astype(str)
+        df_lab[analysis] = df_lab[analysis].astype(str)
         df = df_lab.merge(df, left_on="documents", right_on="SR", how="left")
 
     elif analysis == "authors":
@@ -471,7 +484,9 @@ def best_lab(df, tab_global, n_labels, term):
 
 
 def localCitations(df, fast_search=False, sep=";"):
-    df = metaTagExtraction(df, "SR")
+    _df_check = df.get() if hasattr(df, 'get') and callable(df.get) and not isinstance(df, pd.DataFrame) else df
+    if 'SR' not in _df_check.columns or _df_check['SR'].eq('').all():
+        df = metaTagExtraction(df, "SR")
     M = df.get() if hasattr(df, 'get') and callable(df.get) and not isinstance(df, pd.DataFrame) else df
 
     # PATCH: safety check

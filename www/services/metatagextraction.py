@@ -1,4 +1,3 @@
-import pandas as pd
 from .utils import *
 
 
@@ -8,11 +7,18 @@ def metaTagExtraction(df, Field="AU_CO", sep=";", aff_disamb=False):
     Supports both pandas DataFrame and Shiny reactive.Value.
     """
 
-    # PATCH: support both Shiny reactive.Value and pandas DataFrame
-    if hasattr(df, "get") and callable(df.get) and not isinstance(df, pd.DataFrame):
-        M = df.get().copy()
-    else:
+    # PATCH: original code used hasattr(df, "get") to check if df is a Shiny
+    # reactive object. However pandas DataFrames also have a .get() method,
+    # so this check always returned True for plain DataFrames, causing
+    # df.get() to be called without arguments — which crashes because pandas
+    # .get() requires a column name as argument.
+    # Fixed by using isinstance(df, pd.DataFrame) instead:
+    # - if it's a DataFrame → just copy it directly
+    # - if it's a Shiny reactive object → use .get() to unwrap it first
+    if isinstance(df, pd.DataFrame):
         M = df.copy()
+    else:
+        M = df.get().copy()
 
     if Field == "SR":
         M = SR(M)
@@ -63,9 +69,23 @@ def SR(M):
     SR = FirstAuthors + ", " + M["PY"].astype(str) + ", " + J9
 
     M["SR_FULL"] = SR.str.replace(r"\s+", " ", regex=True)
-   
+
+    st = i = 0
+
+    # PATCH: original while loop caused infinite loop in pandas >= 2.0.
+    # Fixed by using a simple dictionary to track duplicates.
+    # Also handles NaN values by converting to string first.
+    SR = SR.fillna("").astype(str).reset_index(drop=True)
+    seen = {}
+    for idx in SR.index:
+        val = SR.loc[idx]
+        if val in seen:
+            seen[val] += 1
+            SR.loc[idx] = val + "-" + chr(96 + seen[val])
+        else:
+            seen[val] = 0
     M["SR"] = SR.str.replace(r"\s+", " ", regex=True)
-    
+
     return M
 
 

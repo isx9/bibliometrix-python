@@ -42,7 +42,9 @@ def thematic_map(df, field="ID", n=250, minfreq=5, ngrams=1, stemming=False, siz
     else:
         raise ValueError("Invalid field specified.")
 
-    if not NetMatrix.empty:
+    # PATCH: biblionetwork may return None when the keyword matrix is empty
+    # (e.g. PubMed DE is always empty from eSummary API).
+    if NetMatrix is not None and not NetMatrix.empty:
         Net = network_plot(NetMatrix, normalize="association", Title="Keyword co-occurrences", type="auto",
                    labelsize=n_labels, halo=False, cluster=cluster, remove_isolates=True,
                    community_repulsion=community_repulsion, remove_multiple=False, noloops=True,
@@ -571,6 +573,9 @@ def cluster_assignment(M, words, field, remove_terms=None, synonyms=None, thresh
     tc_numeric = pd.to_numeric(M['TC'], errors='coerce').fillna(0)
     M = M.copy()
     M['TC'] = tc_numeric
+    # PATCH: PY is stored as string in ETL output — convert to numeric
+    # before arithmetic in TCpY calculation to avoid TypeError.
+    M['PY'] = pd.to_numeric(M['PY'], errors='coerce')
 
     terms = (M.assign(
         TCpY=lambda x: x['TC'] / (year - x['PY']),

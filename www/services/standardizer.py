@@ -9,7 +9,7 @@ them into a pandas DataFrame with the standard WoS column schema.
 Main entry point:
     standardize(records, source) → pd.DataFrame
 """
-
+import re
 import pandas as pd
 from www.services.mappings import PUBMED_MAPPING, OPENALEX_MAPPING
 
@@ -24,13 +24,31 @@ from www.services.mappings import PUBMED_MAPPING, OPENALEX_MAPPING
 # Copying the function here avoids that problem entirely.
 
 def SR(M):
-    listAU = M["AU"].apply(lambda l: [x.strip() for x in l])
-    if M["DB"].iloc[0].lower() == "scopus":
-        listAU = listAU.apply(lambda l: [x.replace(" ", ",").replace(",,", ",").replace(" ", "") for x in l])
-    FirstAuthors = listAU.apply(lambda l: l[0] if len(l) > 0 else "NA").str.replace(",", " ")
+    def format_author(name):
+        """Convert 'John Smith' or 'Smith, John' to 'Smith J' format."""
+        name = name.strip()
+        if not name or name == "NA":
+            return "NA"
+        # Handle "Surname, Firstname" format
+        if "," in name:
+            parts = name.split(",")
+            surname = parts[0].strip()
+            first = parts[1].strip()
+            initial = first[0] if first else ""
+            return f"{surname} {initial}".strip()
+        # Handle "Firstname Surname" format (OpenAlex style)
+        parts = name.split()
+        if len(parts) >= 2:
+            surname = parts[-1]
+            initial = parts[0][0]
+            return f"{surname} {initial}"
+        return parts[0] if parts else "NA"
+
+    listAU = M["AU"].apply(lambda l: [x.strip() for x in l] if isinstance(l, list) else [])
+    FirstAuthors = listAU.apply(lambda l: format_author(l[0]) if len(l) > 0 else "NA")
     no_art = M["JI"] == ""
     M.loc[no_art, "JI"] = M.loc[no_art, "SO"]
-    J9 = M["JI"].str.replace(".", " ", regex=False).str.strip()
+    J9 = M["JI"].str.replace(".", " ", regex=False).str.strip().str.upper()
     SR_col = FirstAuthors + ", " + M["PY"].astype(str) + ", " + J9
     M["SR_FULL"] = SR_col.str.replace(r"\s+", " ", regex=True)
     st = i = 0
@@ -44,6 +62,7 @@ def SR(M):
     M["SR"] = SR_col.str.replace(r"\s+", " ", regex=True)
     return M
 
+
 def apply_mapping(record: dict, mapping: dict) -> dict:
     """
     Renames raw API field names to WoS tags using the mapping dictionary.
@@ -55,6 +74,10 @@ def apply_mapping(record: dict, mapping: dict) -> dict:
         result[wos_tag] = record.get(raw_field, "")
     return result
 
+
+# ---------------------------------------------------------------------------
+# PubMed parsers
+# ---------------------------------------------------------------------------
 
 def parse_pubmed_authors(record: dict) -> list:
     """
@@ -125,6 +148,11 @@ def standardize_pubmed(record: dict) -> dict:
     # Step 1: rename simple fields
     result = apply_mapping(record, PUBMED_MAPPING)
 
+    # PY — extract 4-digit year from raw pubdate string e.g. "2026 Jun 6" → "2026"
+    py_raw = result.get("PY", "")
+    match = re.match(r"(\d{4})", str(py_raw))
+    result["PY"] = match.group(1) if match else ""
+
     # LA comes as a list from PubMed e.g. ['eng'], extract first element
     la = record.get("lang", "")
     result["LA"] = la[0] if isinstance(la, list) and len(la) > 0 else ""
@@ -139,18 +167,32 @@ def standardize_pubmed(record: dict) -> dict:
     # Step 3: fill missing fields with safe defaults
     result["AB"] = ""
     result["C1"] = []
+    result["AU_CO"] = []
     result["DE"] = []
     result["ID"] = []
     result["TC"] = 0
     result["DB"] = "PUBMED"
     result["SR"] = ""
 
+    # Spec requirement: no NaN or None allowed in final output
+    # Replace None with "" for string fields and [] for list fields
+    str_cols = ["UT", "DI", "PMID", "TI", "SO", "JI", "PY", "DT", "LA", "RP", "AB", "VL", "IS", "BP", "EP", "SR"]
+    list_cols = ["AU", "AF", "C1", "AU_CO", "CR", "DE", "ID"]
+
+    for col in str_cols:
+        if result.get(col) is None or (isinstance(result.get(col), float)):
+            result[col] = ""
+
+    for col in list_cols:
+        if result.get(col) is None:
+            result[col] = []
+
     return result
 
 
-
-
-
+# ---------------------------------------------------------------------------
+# OpenAlex parsers
+# ---------------------------------------------------------------------------
 
 def parse_openalex_location(record: dict) -> dict:
     """
@@ -165,7 +207,7 @@ def parse_openalex_location(record: dict) -> dict:
     source = location.get("source", {})
     if not source:
         return result
-    name = source.get("display_name", "")
+    name = source.get("display_name") or ""
     result["SO"] = name.upper()
     result["JI"] = name
     return result
@@ -229,7 +271,6 @@ def parse_openalex_abstract(record: dict) -> str:
     return " ".join(words)
 
 
-
 def parse_openalex_biblio(record: dict) -> dict:
     """
     Extracts volume, issue, and page numbers from OpenAlex's biblio field.
@@ -259,15 +300,98 @@ def parse_openalex_keywords(record: dict) -> list:
     return result
 
 
+def parse_openalex_countries(record: dict) -> list:
+    """
+    Extracts author countries (AU_CO) from OpenAlex's authorships field.
+    Each authorship entry contains institution data with a country_code field.
+    Returns a list of unique country code strings e.g. ["US", "DE"].
+    Pre-populating AU_CO here bypasses metaTagExtraction()'s WoS-style
+    affiliation parser, which cannot handle OpenAlex affiliation strings
+    and would silently return empty results for non-WoS sources.
+    get_collaborationnetwork.py checks 'if AU_CO not in m.columns' before
+    calling metaTagExtraction(), so a pre-populated column is used directly.
+    """
+    authorships = record.get("authorships", [])
+    countries = []
+    for authorship in authorships:
+        for institution in authorship.get("institutions", []):
+            country = institution.get("country_code", "") or ""
+            if country and country not in countries:
+                countries.append(country.upper())
+    return countries
+
+
+def resolve_openalex_references(work_ids: list) -> list:
+    """
+    Resolves a list of OpenAlex work IDs (e.g. 'https://openalex.org/W123')
+    to WoS-style citation strings ('Smith J, 2019, NAT COMMUN').
+    Fetches metadata from the OpenAlex API in batches of 50.
+    Returns a list of formatted strings. Unresolvable IDs are skipped.
+    """
+    import time
+    import requests
+
+    if not work_ids:
+        return []
+
+    # Strip to bare IDs: 'https://openalex.org/W123' → 'W123'
+    bare_ids = [w.split("/")[-1] for w in work_ids if w]
+
+    results = []
+    batch_size = 50
+
+    for i in range(0, len(bare_ids), batch_size):
+        batch = bare_ids[i:i + batch_size]
+        filter_str = "|".join(batch)
+        url = "https://api.openalex.org/works"
+        params = {
+            "filter": f"openalex_id:{filter_str}",
+            "per-page": batch_size,
+            "select": "id,authorships,publication_year,primary_location"
+        }
+        try:
+            response = requests.get(url, params=params, timeout=10)
+            if response.status_code != 200:
+                continue
+            data = response.json()
+            for work in data.get("results", []):
+                # First author last name + initial e.g. "Jane Smith" → "Smith J"
+                authorships = work.get("authorships", [])
+                au = ""
+                if authorships:
+                    name = authorships[0].get("author", {}).get("display_name", "")
+                    parts = name.split()
+                    if len(parts) >= 2:
+                        au = parts[-1] + " " + parts[0][0]
+                    elif parts:
+                        au = parts[0]
+                # Year
+                py = str(work.get("publication_year", "") or "")
+                # Journal name
+                loc = work.get("primary_location") or {}
+                src = loc.get("source") or {}
+                so = (src.get("display_name") or "").upper()
+                if au or py or so:
+                    results.append(f"{au}, {py}, {so}")
+        except Exception:
+            pass
+        time.sleep(0.3)  # be polite to the API
+
+    return results
+
+
 def parse_openalex_references(record: dict) -> list:
     """
-    Extracts referenced works (CR) from OpenAlex's referenced_works field.
-    Returns a list of OpenAlex IDs as strings.
-    Note: these are not formatted WoS reference strings — they are
-    OpenAlex URLs. Citation network features will have limited accuracy.
+    Extracts cited references (CR) from OpenAlex's referenced_works field.
+    Resolves raw OpenAlex IDs to WoS-style citation strings via the API
+    so that citation network features (Historiograph, Cluster by Coupling,
+    Most Local Cited Sources/Authors/Documents) can match references correctly.
+    Returns a list of strings formatted as 'FirstAuthor, Year, Journal'.
     """
     references = record.get("referenced_works", [])
-    return [ref for ref in references if ref]
+    if not references:
+        return []
+    return resolve_openalex_references(references)
 
 
 def standardize_openalex(record: dict) -> dict:
@@ -288,6 +412,7 @@ def standardize_openalex(record: dict) -> dict:
     result["AB"] = parse_openalex_abstract(record)
     result.update(parse_openalex_biblio(record))
     result["DE"] = parse_openalex_keywords(record)
+    result["AU_CO"] = parse_openalex_countries(record)
     result["CR"] = parse_openalex_references(record)
 
     # DI — strip URL prefix and handle None
@@ -304,11 +429,24 @@ def standardize_openalex(record: dict) -> dict:
     result["DB"] = "OPENALEX"
     result["SR"] = ""
 
+    # Spec requirement: no NaN or None allowed in final output
+    str_cols = ["UT", "DI", "PMID", "TI", "SO", "JI", "PY", "DT", "LA", "RP", "AB", "VL", "IS", "BP", "EP", "SR"]
+    list_cols = ["AU", "AF", "C1", "AU_CO", "CR", "DE", "ID"]
+
+    for col in str_cols:
+        if result.get(col) is None or (isinstance(result.get(col), float)):
+            result[col] = ""
+
+    for col in list_cols:
+        if result.get(col) is None:
+            result[col] = []
+
     return result
 
 
-
-
+# ---------------------------------------------------------------------------
+# Main entry point
+# ---------------------------------------------------------------------------
 
 def standardize(records: list, source: str) -> pd.DataFrame:
     """

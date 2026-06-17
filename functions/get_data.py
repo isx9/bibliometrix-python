@@ -67,8 +67,26 @@ def get_data(input, database, df, reset_callback=None):
             )
 
     elif input.select() == "1B":
-        df.set(pd.read_excel(file[0]["datapath"]))
-        # Reset all analysis results when new dataset is loaded
+        # PATCH: support both CSV and Excel formats
+        fpath = file[0]["datapath"]
+        fname = file[0]["name"]
+        if fname.endswith(".csv"):
+            loaded_df = pd.read_csv(fpath)
+        else:
+            loaded_df = pd.read_excel(fpath)
+    
+        # PATCH: deserialize list columns from string representation back to actual lists.
+        # When a DataFrame with list columns is saved to CSV, pandas serializes lists as
+        # strings (e.g. "['a', 'b']"). On reload they must be converted back to real lists
+        # otherwise all author/keyword/citation analyses produce empty results.
+        list_cols = ['AU', 'AF', 'C1', 'AU_CO', 'DE', 'ID', 'CR']
+        for col in list_cols:
+            if col in loaded_df.columns:
+                loaded_df[col] = loaded_df[col].apply(
+                    lambda x: ast.literal_eval(x) if isinstance(x, str) and x.startswith('[') else (x if isinstance(x, list) else [])
+                )
+    
+        df.set(loaded_df)
         if reset_callback:
             reset_callback()
         text = ui.p(

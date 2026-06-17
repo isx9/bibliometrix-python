@@ -27,17 +27,18 @@ def get_historiograph(df, node_label="AU1", histNodes=20, hist_isolates=True, hi
         filename: name of the temporarily saved interactive HTML file
     """
     # Pre-processing
-    df = metaTagExtraction(df, "SR")
+    _df = df.get() if hasattr(df, 'get') and not isinstance(df, pd.DataFrame) else df
+    if 'SR' not in _df.columns or _df['SR'].eq('').all():
+        df = metaTagExtraction(df, "SR")
     # PATCH: metaTagExtraction may return a plain DataFrame — wrap in reactive
     # so histNetwork/cocMatrix can call .get() on it
-    if not hasattr(df, 'get') or isinstance(df, pd.DataFrame):
-        df = reactive.Value(df)
     hist_results = histNetwork(df, min_citations=0, sep=sep, network=True)
-    # PATCH: histNetwork returns None when no local citations are found
-    if hist_results is None:
-        raise ValueError("No citation data available for historiograph with this dataset.")
+    # CR data limitation: OpenAlex CR = URLs, PubMed CR = empty
+    # histNetwork returns None or empty NetMatrix — return gracefully
     if hist_results is None or hist_results.get('NetMatrix') is None:
-        raise ValueError("No citation data available for historiograph with this dataset.")
+        empty_df = pd.DataFrame(columns=["Paper", "Title", "Year", "DOI", "LCS", "GCS", "cluster"])
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".html")
+        return None, empty_df, tmp.name.split(os.sep)[-1]
     # 1. Initial graph construction
     hist_plot = histPlot(
         hist_results,

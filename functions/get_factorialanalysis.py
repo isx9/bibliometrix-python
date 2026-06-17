@@ -1,16 +1,6 @@
 from www.services import *
 from scipy.spatial import ConvexHull, QhullError
 
-# FIX 1: imports spostati a livello di modulo invece che dentro la funzione
-import networkx as nx
-from pyvis.network import Network
-from scipy.cluster.hierarchy import linkage, to_tree, dendrogram, optimal_leaf_ordering
-from scipy.spatial.distance import pdist
-from pathlib import Path
-import math
-import tempfile
-import os
-
 
 def distance_to_y(dist, max_dist, scale_factor):
     norm = math.log1p(dist) / math.log1p(max_dist)
@@ -98,7 +88,7 @@ def get_factorial_analysis(
         min_degree = list(tab.values())[min(n_terms, len(tab) - 1)]
 
         CS = conceptual_structure(
-            df=df_plain,
+            df=df_plain, #patch
             method=method,
             field=field,
             min_degree=min_degree,
@@ -198,16 +188,10 @@ def get_factorial_analysis(
                     ),
                     opacity=0.7,
                     text=group_df["label"],
-                    # FIX 4: customdata aggiunto per esporre cluster e contrib nell'hovertemplate
-                    customdata=np.stack([
-                        group_df["groups"].astype(str),
-                        group_df["contrib"].round(3)
-                    ], axis=-1),
-                    hovertemplate=(
-                        "<b>%{text}</b><br>"
-                        "Cluster: %{customdata[0]}<br>"
-                        "Contribuzione: %{customdata[1]}<extra></extra>"
-                    ),
+                    hovertext=[
+                        f"<b>{row['label']}</b><br>Cluster: {row['groups']}<br>Contrib: {row['contrib']:.3f}"
+                        for _, row in group_df.iterrows()
+                    ],
                     hoverinfo="text",
                     name=f"Cluster {g}",
                     showlegend=False,
@@ -230,16 +214,10 @@ def get_factorial_analysis(
                     ),
                     opacity=0.7,
                     text=group_df_nan["label"],
-                    # FIX 4: stesso fix per il gruppo NaN
-                    customdata=np.stack([
-                        np.full(len(group_df_nan), "N/A"),
-                        group_df_nan["contrib"].round(3)
-                    ], axis=-1),
-                    hovertemplate=(
-                        "<b>%{text}</b><br>"
-                        "Cluster: %{customdata[0]}<br>"
-                        "Contribuzione: %{customdata[1]}<extra></extra>"
-                    ),
+                    hovertext=[
+                        f"<b>{row['label']}</b><br>Cluster: N/A<br>Contrib: {row['contrib']:.3f}"
+                        for _, row in group_df_nan.iterrows()
+                    ],
                     hoverinfo="text",
                     name="No Cluster",
                     showlegend=False,
@@ -295,8 +273,12 @@ def get_factorial_analysis(
             layer="below"
         )
 
-        # FIX 4: rimosso il loop che sovrascriveva l'hovertemplate con %{marker.color}
-        # L'hovertemplate corretto è già impostato in ogni add_trace sopra
+        for trace in fig.data:
+            trace.hovertemplate = (
+                "<b>%{text}</b><br>"
+                "Cluster: %{marker.color}<br>"
+                "Contribuzione: %{marker.size:.2f}<extra></extra>"
+            )
 
         fig.update_layout(
             xaxis=dict(
@@ -326,9 +308,18 @@ def get_factorial_analysis(
         fig._config = fig._config | {'modeBarButtonsToRemove': ['pan', 'select', 'lasso2d', 'toImage'],
                                      'displaylogo': False}
 
+        import networkx as nx
+        from pyvis.network import Network
+        from scipy.cluster.hierarchy import linkage, to_tree
+        from pathlib import Path
+        from scipy.cluster.hierarchy import optimal_leaf_ordering
+        from scipy.spatial.distance import pdist
+        import math
+        import tempfile
+        import os
+
         labels_lower = CS["km_res"]["data"].index.str.lower().tolist()
         coords = CS["km_res"]["data"][["Dim1", "Dim2"]].values
-        # FIX 2: rinominato linkage_matrix per evitare conflitto con la funzione linkage importata
         linkage_matrix = CS["linkage"]
 
         word_to_cluster = dict(zip(WData["word"], WData["cluster"]))
@@ -555,7 +546,13 @@ def conceptual_structure(
 
     if field == "ID":
         CW = cocMatrix(df, Field="ID", binary=binary, remove_terms=remove_terms, synonyms=synonyms)
-        CW = CW.loc[:, CW.sum() >= min_degree]
+        # PATCH: cocMatrix returns None when the field is empty
+        # (e.g. ID/Keywords Plus is always empty for OpenAlex and PubMed).
+        # Fixed by checking if CW is None before using it.
+        if CW is None:
+            return {"res": None, "map": go.FigureWidget(go.Figure()), "clusters": pd.DataFrame()}
+
+        CW = CW.loc[:, CW.sum() >= min_degree]    
         CW = CW.loc[CW.sum(axis=1) > 0]
         CW = CW.loc[:, ~CW.columns.isin(["NA"])]
 
@@ -634,21 +631,20 @@ def conceptual_structure(
         tc_map = dict(zip(df_index_upper, df["TC"].astype(float)))
         doc_coord["TC"] = doc_coord_index_upper.map(tc_map)
 
-    # FIX 2: rinominato km_res_linkage per evitare shadowing del dizionario km_res
-    km_res_linkage = linkage(pdist(df, metric='euclidean'), method='average')
-    results['linkage'] = km_res_linkage
+    km_res = linkage(pdist(df, metric='euclidean'), method='average')
+    results['linkage'] = km_res
 
     # PATCH 5: n_clusters greater than the number of available terms causes
     # fcluster to produce unexpected behavior or crash.
     # → clamp n_clusters to [1, len(CW.columns)] before calling fcluster.
     max_clusters = len(CW.columns)
     if n_clusters == "auto":
-        heights = np.diff(km_res_linkage[:, 2])
+        heights = np.diff(km_res[:, 2])
         n_clusters = min(len(heights) - np.argmax(heights) + 1, k_max, max_clusters)
     else:
         n_clusters = max(1, min(int(n_clusters), k_max, max_clusters))
 
-    cluster_labels = fcluster(km_res_linkage, n_clusters, criterion='maxclust')
+    cluster_labels = fcluster(km_res, n_clusters, criterion='maxclust')
     df = df.copy()
     df['cluster'] = cluster_labels
 
@@ -701,14 +697,14 @@ def conceptual_structure(
             'docCoord': doc_coord,
             'coord': results['coord'] if 'coord' in results else None,
             'hull_data': hull_data,
-            'linkage': km_res_linkage
+            'linkage': km_res
         }
     else:
         results = {
             'net': CW, 'res': df,
             'km_res': {'data': df, 'centers': centers, 'cluster': df['cluster']},
             'docCoord': None, 'coord': None,
-            'hull_data': hull_data, 'linkage': km_res_linkage
+            'hull_data': hull_data, 'linkage': km_res
         }
 
     params = {
@@ -805,16 +801,15 @@ def factorial(X, method, n_clusters=5, k_max=5):
         coords = mds.fit_transform(dissim_matrix)
         coords = StandardScaler().fit_transform(coords)
         df = pd.DataFrame(coords, columns=["Dim1", "Dim2"], index=X.columns)
-        # FIX 2: rinominato km_res_linkage anche qui per coerenza
-        km_res_linkage = linkage(pdist(df), method='average')
+        km_res = linkage(pdist(df), method='average')
 
         if n_clusters == "auto":
-            heights = np.diff(km_res_linkage[:, 2])
+            heights = np.diff(km_res[:, 2])
             n_clusters = min(len(heights) - np.argmax(heights) + 1, k_max)
         else:
             n_clusters = max(1, min(int(n_clusters), k_max))
 
-        cluster_labels = fcluster(km_res_linkage, n_clusters, criterion='maxclust')
+        cluster_labels = fcluster(km_res, n_clusters, criterion='maxclust')
         df["cluster"] = cluster_labels
 
         centroids = df.groupby("cluster")[["Dim1", "Dim2"]].transform("mean")

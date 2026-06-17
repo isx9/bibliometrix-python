@@ -107,6 +107,10 @@ def field_by_year(df, field, timespan, min_freq, n_items, remove_terms=None, syn
 
     n = A.sum(axis=0).to_numpy()
 
+    # PATCH: PY is stored as string in ETL output — convert to numeric
+    # before passing to np.quantile to avoid TypeError on string subtraction.
+    df['PY'] = pd.to_numeric(df['PY'], errors='coerce')
+
     # PATCH: skip columns with zero total frequency when computing quantiles
     def safe_quantile(x):
         repeated = np.repeat(df['PY'].values, x.astype(int))
@@ -124,7 +128,10 @@ def field_by_year(df, field, timespan, min_freq, n_items, remove_terms=None, syn
     if trend_med.empty:
         return trend_med
 
-    if timespan is None or len(timespan) != 2:
+    # PATCH: timespan may be passed as an integer (time_window) rather than a
+    # [start, end] list — len() on an int crashes with TypeError.
+    # Treat any non-list value as missing and fall back to the data range.
+    if timespan is None or not isinstance(timespan, (list, tuple)) or len(timespan) != 2:
         timespan = [trend_med['year_med'].min(), trend_med['year_med'].max()]
 
     trend_med = trend_med[(trend_med['year_med'] >= timespan[0]) & (trend_med['year_med'] <= timespan[1])]

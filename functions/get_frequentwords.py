@@ -110,12 +110,16 @@ def table_tag(df, tag, ngrams=1, remove_terms=None, synonyms=None):
     # Remove duplicates
     M = M.drop_duplicates(subset='SR')
 
+
     # Get text data based on tag
     if tag in ['AB', 'TI']:
         # PATCH: pass plain DataFrame to term_extraction — it does not accept reactives
         df_plain = df.get() if hasattr(df, 'get') and callable(df.get) and not isinstance(df, pd.DataFrame) else df
-        text_data = term_extraction(df_plain, field=tag, stemming=False, verbose=False,
+        try:
+            text_data = term_extraction(df_plain, field=tag, stemming=False, verbose=False,
                                     ngrams=ngrams, remove_terms=remove_terms, synonyms=synonyms)
+        except ValueError:
+            return {}
         text_data = text_data[f"{tag}_TM"]
     else:
         text_data = M[tag]

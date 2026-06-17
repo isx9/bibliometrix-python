@@ -13,7 +13,10 @@ def get_sources_production(df, num_of_sources_production, occurences):
     Returns:
         A Plotly figure object representing the sources' production over time.
     """
-    data = df.get()
+    # PATCH: original code called df.get() without arguments, which crashes on a
+    # plain pandas DataFrame because pandas .get() requires a column name as argument.
+    # Fixed by checking isinstance(df, pd.DataFrame) first.
+    data = df if isinstance(df, pd.DataFrame) else df.get()
 
     # Calculate the number of publications per year for each source
     WSO = cocMatrix(df, Field="SO")
@@ -25,14 +28,34 @@ def get_sources_production(df, num_of_sources_production, occurences):
 
     data["PY"] = data["PY"].astype(str)
     WPY = cocMatrix(df, Field="PY")
+    # PATCH: PubMed PY may contain full date strings (e.g. "2026 Jun 6")
+    # instead of plain year integers — astype(int) crashes on these.
+    # Extract the first 4-digit year with pd.to_numeric after extracting digits.
+    data["PY"] = pd.to_numeric(data["PY"].astype(str).str.extract(r'(\d{4})')[0], errors='coerce')
+    data = data.dropna(subset=["PY"])
     data["PY"] = data["PY"].astype(int)
 
-    missing_years = set(range(data["PY"].min(), data["PY"].max() + 1)) - set(WPY.columns.astype(int))
+    # PATCH: WPY columns may contain full date strings from PubMed PY field —
+    # extract 4-digit year from column names before casting to int.
+    wpy_years = pd.to_numeric(
+        pd.Index(WPY.columns).astype(str).str.extract(r'(\d{4})')[0],
+        errors='coerce'
+    ).dropna().astype(int)
+    missing_years = set(range(data["PY"].min(), data["PY"].max() + 1)) - set(wpy_years)
     if missing_years:
         for year in missing_years:
             WPY[str(year)] = 0
 
-    WPY = WPY[sorted(WPY.columns.astype(int).astype(str))]
+    # PATCH: WPY columns may still contain full date strings — extract 4-digit
+    # year from each column name before sorting and reindexing.
+    valid_cols = {
+        col: str(int(pd.to_numeric(str(col).strip()[:4], errors='coerce')))
+        for col in WPY.columns
+        if pd.to_numeric(str(col).strip()[:4], errors='coerce') is not None
+        and not pd.isna(pd.to_numeric(str(col).strip()[:4], errors='coerce'))
+    }
+    WPY = WPY.rename(columns=valid_cols)
+    WPY = WPY[sorted(WPY.columns, key=lambda x: int(x) if x.isdigit() else 0)]
 
     PYSO = WPY.T.dot(WSO)
     ind = PYSO.sum(axis=0)

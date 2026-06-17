@@ -12,9 +12,14 @@ def get_cited_documents(df, num_of_cited_docs, cited_docs_measure):
         return None, pd.DataFrame()
 
     # EXTRACT SR
-    df = metaTagExtraction(df, "SR")
+    _df = df.get() if hasattr(df, 'get') and not isinstance(df, pd.DataFrame) else df
+    if 'SR' not in _df.columns or _df['SR'].eq('').all():
+        df = metaTagExtraction(df, "SR")
 
-    data = df.get()
+    # PATCH: original code called df.get() without arguments, which crashes on a
+    # plain pandas DataFrame because pandas .get() requires a column name as argument.
+    # Fixed by checking isinstance(df, pd.DataFrame) first.
+    data = df if isinstance(df, pd.DataFrame) else df.get()
 
     # EMPTY CHECK
     if data is None or data.empty:

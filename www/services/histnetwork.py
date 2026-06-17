@@ -2,15 +2,20 @@
 
 from .utils import *
 from .cocmatrix import *
+import ast
 
 
 def histNetwork(df, min_citations=0, sep=";", network=True):
 
-    # Support both pandas DataFrame and Shiny reactive.Value
-    if hasattr(df, "get") and not isinstance(df, pd.DataFrame):
-        M = df.get().copy()
-    else:
+    # PATCH: original code called df.get() without arguments, which crashes
+    # on a pandas DataFrame because pandas .get() requires a column name as argument.
+    # Fixed by checking isinstance(df, pd.DataFrame) first:
+    # - if it's a DataFrame → just copy it directly
+    # - if it's a Shiny reactive object → use .get() to unwrap it
+    if isinstance(df, pd.DataFrame):
         M = df.copy()
+    else:
+        M = df.get().copy()
 
     # SAFETY CHECK
     if M is None or M.empty:
@@ -35,11 +40,20 @@ def histNetwork(df, min_citations=0, sep=";", network=True):
         return None
 
     # ENSURE CR IS LIST
-    M['CR'] = M['CR'].apply(
-        lambda x: x if isinstance(x, list)
-        else [i.strip() for i in str(x).split(sep)] if pd.notna(x)
-        else []
-    )
+    def _parse_cr(x, sep):
+        if isinstance(x, list):
+            return x
+        if pd.isna(x):
+            return []
+        s = str(x).strip()
+        if s.startswith('['):
+            try:
+                return ast.literal_eval(s)
+            except (ValueError, SyntaxError):
+                pass
+        return [i.strip() for i in s.split(sep)]
+
+    M['CR'] = M['CR'].apply(lambda x: _parse_cr(x, sep))
 
     # SAFE TC HANDLING
     if 'TC' not in M.columns:
@@ -170,6 +184,9 @@ def wos(M, min_citations, sep, network):
     )
 
     CR_df['LABEL'] = CR_df['LABEL'].str.strip()
+    print("Sample M LABEL:", M['LABEL'].iloc[0])
+    print("Sample CR LABEL:", CR_df['LABEL'].iloc[0] if not CR_df.empty else "empty")
+    print("Overlap:", len(set(M['LABEL']) & set(CR_df['LABEL'])))
 
     # MATCH REFERENCES
     L = pd.merge(
@@ -264,8 +281,13 @@ def wos(M, min_citations, sep, network):
 
         M['LCR'] = M['LCR'].fillna('')
 
+        # PATCH: original code wrapped M in reactive.Value(M) before passing to cocMatrix.
+        # reactive.Value is a Shiny-specific object that only works inside a running
+        # Shiny application. When called from a notebook or test script, reactive is
+        # not available and this crashes with a NameError.
+        # Fixed by passing M directly since cocMatrix already handles plain DataFrames.
         WLCR = cocMatrix(
-            reactive.Value(M),
+            M,
             Field="LCR",
             sep=sep
         )
@@ -310,11 +332,20 @@ def scopus(M, min_citations=0, sep=";", network=True):
             return None
 
     # ENSURE CR LISTS
-    M['CR'] = M['CR'].apply(
-        lambda x: x if isinstance(x, list)
-        else [i.strip() for i in str(x).split(sep)] if pd.notna(x)
-        else []
-    )
+    def _parse_cr(x, sep):
+        if isinstance(x, list):
+            return x
+        if pd.isna(x):
+            return []
+        s = str(x).strip()
+        if s.startswith('['):
+            try:
+                return ast.literal_eval(s)
+            except (ValueError, SyntaxError):
+                pass
+        return [i.strip() for i in s.split(sep)]
+
+    M['CR'] = M['CR'].apply(lambda x: _parse_cr(x, sep))
 
     CR = M['CR']
 

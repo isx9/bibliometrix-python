@@ -41,18 +41,34 @@ def get_word_frequency(df, ngram, field_wf, file_upload_terms_wf, file_upload_sy
     
     # PATCH: extract plain DataFrame before passing to term_extraction
     df_plain = df.get() if hasattr(df, 'get') and callable(df.get) and not isinstance(df, pd.DataFrame) else df
-    data = term_extraction(df_plain, field=field_wf, stemming=False, verbose=False,
-                        ngrams=ngrams, remove_terms=remove_terms, synonyms=synonyms)
+    # PATCH: term_extraction crashes with ValueError when the field column is
+    # entirely empty (e.g. PubMed DE is always empty from eSummary API) because
+    # sklearn's vectorizer receives an empty vocabulary.
+    # Wrap in try/except and return empty results gracefully.
+    try:
+        data = term_extraction(df_plain, field=field_wf, stemming=False, verbose=False,
+                           ngrams=ngrams, remove_terms=remove_terms, synonyms=synonyms)
+    except ValueError:
+        return go.FigureWidget(go.Figure()), pd.DataFrame()
+    tm_col = f"{field_wf}_TM"
+    if tm_col in data.columns and data[tm_col].apply(lambda x: len(x) if isinstance(x, list) else 0).sum() == 0:
+        return go.FigureWidget(go.Figure()), pd.DataFrame()
     if field_wf == 'TI':
         print(data[f"{field_wf}_TM"])
 
     # Calculate word frequency
+    # PATCH: top_words may be passed as a plain int rather than a [start, end]
+    # list — indexing an int crashes with TypeError.
+    # Normalize to a [0, n] range if a plain int is given.
+    if isinstance(top_words, int):
+        top_words = [0, top_words]
+
     if field_wf in ['AB', 'TI']:
         word_freq = keyword_growth(data, tag=f"{field_wf}_TM", top=top_words[1], cdf=(occurrences == 'cumulate'),
-                                   remove_terms=remove_terms, synonyms=synonyms)
+                               remove_terms=remove_terms, synonyms=synonyms)
     else:
         word_freq = keyword_growth(data, tag=field_wf, top=top_words[1], cdf=(occurrences == 'cumulate'),
-                                   remove_terms=remove_terms, synonyms=synonyms)
+                               remove_terms=remove_terms, synonyms=synonyms)
 
     # PATCH 2: top_words[1] was used both as the max number of terms in
     # keyword_growth and as a column slice index. If top_words[0] >= number of

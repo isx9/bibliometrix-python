@@ -11,7 +11,10 @@ def get_relevant_authors(df, num_of_authors, frequency="N. of Documents"):
     if df is None:
         return None, pd.DataFrame()
 
-    data = df.get()
+    # PATCH: original code called df.get() without arguments, which crashes on a
+    # plain pandas DataFrame because pandas .get() requires a column name as argument.
+    # Fixed by checking isinstance(df, pd.DataFrame) first.
+    data = df if isinstance(df, pd.DataFrame) else df.get()
 
     if data is None or data.empty:
         return None, pd.DataFrame()

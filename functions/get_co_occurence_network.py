@@ -422,7 +422,10 @@ def field_by_year(df, field_cn, timespan=None, min_freq=2, n_items=5, remove_ter
 
     n = np.sum(A, axis=0)
 
-    years = M['PY'].values
+    # PATCH: PY column is stored as string in the standardized DataFrame
+    # but np.percentile requires numeric values.
+    # Fixed by converting PY to numeric before using it.
+    years = pd.to_numeric(M['PY'], errors='coerce').values
 
     trend_med = []
     for col_idx in range(A.shape[1]):

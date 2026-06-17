@@ -14,7 +14,10 @@ def get_lotka_law(df):
     """
     
     # Calculate Lotka's Law
-    data = df.get()
+    # PATCH: original code called df.get() without arguments, which crashes on a
+    # plain pandas DataFrame because pandas .get() requires a column name as argument.
+    # Fixed by checking isinstance(df, pd.DataFrame) first.
+    data = df if isinstance(df, pd.DataFrame) else df.get()
     
     # Author Productivity (Lotka's Law)
     authors = pd.Series([author.strip() for sublist in data['AU'] for author in sublist])

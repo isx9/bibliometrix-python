@@ -58,12 +58,8 @@ def get_corresponding_author_countries(df, top_k_countries):
     total_articles = filtered_country_counts["Articles"].sum()
     filtered_country_counts["Article_Freq"] = filtered_country_counts["Articles"] / total_articles
     filtered_country_counts["MCP_Ratio"] = filtered_country_counts["MCP"] / filtered_country_counts["Articles"]
-    
-    print("ROWS BEFORE FILTER:", len(filtered_country_counts))
-    print(filtered_country_counts.head())
+
     filtered_country_counts = filtered_country_counts.dropna(subset=["Country"])
-    print("ROWS AFTER FILTER:", len(filtered_country_counts))
-    print(filtered_country_counts.head())
     filtered_country_counts = filtered_country_counts.head(top_k_countries)
     filtered_country_counts = filtered_country_counts.sort_values(by="Articles", ascending=True)
 

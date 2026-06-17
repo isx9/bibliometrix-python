@@ -7,7 +7,10 @@ def get_main_informations(df, log=False):
     Calculate various filters and metrics for the DataFrame.
     """
 
-    data = df.get()
+    # PATCH: original code called df.get() without arguments, which crashes on a
+    # plain pandas DataFrame because pandas .get() requires a column name as argument.
+    # Fixed by checking isinstance(df, pd.DataFrame) first.
+    data = df if isinstance(df, pd.DataFrame) else df.get()
 
     #### Min and Max Year ####
     start_time = time.time()

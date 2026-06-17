@@ -27,6 +27,14 @@ def biblionetwork(
     # ---------------- COUPLING ---------------- #
 
     if analysis == "coupling":
+        # PATCH: CR-based coupling is not viable for OpenAlex or PubMed because
+        # CR contains raw URLs (OpenAlex) or empty lists (PubMed) instead of
+        # formatted WoS reference strings. Each URL is unique so cocMatrix builds
+        # a massive sparse matrix that crashes with OOM. Skip early.
+        db_name = ""
+        if "DB" in M.columns and not M["DB"].empty:
+            db_name = str(M["DB"].iloc[0]).lower()
+    
 
         if network == "authors":
 

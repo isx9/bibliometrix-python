@@ -12,7 +12,10 @@ def get_relevant_sources(df, num_of_sources):
     Returns:
         A Plotly figure object and a DataFrame of the most relevant sources.
     """
-    data = df.get()
+    # PATCH: original code called df.get() without arguments, which crashes on a
+    # plain pandas DataFrame because pandas .get() requires a column name as argument.
+    # Fixed by checking isinstance(df, pd.DataFrame) first.
+    data = df if isinstance(df, pd.DataFrame) else df.get()
 
     # Drop rows with missing values
     data = data.dropna(subset=["SO"])

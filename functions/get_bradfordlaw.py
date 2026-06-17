@@ -12,7 +12,13 @@ def get_bradford_law(df):
         A Plotly figure object and a DataFrame of the Bradford's Law zones.
     """
     # Sort data by frequency of occurrence (equivalent to R's sort(table(M$SO), decreasing = TRUE))
-    data = df.get()
+    # PATCH: original code called df.get() without arguments, which crashes
+    # on a pandas DataFrame because pandas .get() requires a column name.
+    # Fixed by checking isinstance(df, pd.DataFrame) first.
+    if isinstance(df, pd.DataFrame):
+        data = df.copy()
+    else:
+        data = df.get()
     source_counts = data["SO"].value_counts()
     
     # Total number of sources

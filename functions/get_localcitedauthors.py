@@ -11,7 +11,9 @@ def get_local_cited_authors(df, num_of_cited_authors, fast_search=False):
         return None, pd.DataFrame()
 
     # ENSURE SR EXISTS
-    df = metaTagExtraction(df, "SR")
+    _df = df.get() if hasattr(df, 'get') and not isinstance(df, pd.DataFrame) else df
+    if 'SR' not in _df.columns or _df['SR'].eq('').all():
+        df = metaTagExtraction(df, "SR")
 
     # PATCH: metaTagExtraction may return a reactive or a plain DataFrame
     M = df.get() if hasattr(df, 'get') and callable(df.get) and not isinstance(df, pd.DataFrame) else df
@@ -48,23 +50,20 @@ def get_local_cited_authors(df, num_of_cited_authors, fast_search=False):
     ).fillna(0)
 
     # SAFE AUTHOR FORMAT
-    import ast
-
     M['AU'] = M['AU'].apply(
-    lambda x:
-    x if isinstance(x, list)
-    else ast.literal_eval(x)
-         if isinstance(x, str) and x.startswith("[")
-         else [i.strip() for i in str(x).split(";")]
-         if pd.notna(x)
-         else []
-)
+        lambda x: x
+        if isinstance(x, list)
+        else [i.strip() for i in str(x).split(";")] if pd.notna(x)
+        else []
+    )
+
     # LOCAL CITATION THRESHOLD
     if fast_search:
         loccit = M['TC'].quantile(0.75)
     else:
         loccit = 1
 
+    # HIST NETWORK
     H = histNetwork(
         df,
         min_citations=loccit,
@@ -72,40 +71,15 @@ def get_local_cited_authors(df, num_of_cited_authors, fast_search=False):
         network=False
     )
 
-    print("AFTER HISTNETWORK")
-    print(type(H))
-    print(H.keys() if H is not None else "H IS NONE")
-
-    print("POINT 1")
-
-    M = H['M']
-
-    print("POINT 2")
-
-    if 'LCS' not in M.columns:
-        M['LCS'] = M['TC']
-
-    print("POINT 3")
-
-    if M['LCS'].sum() == 0:
-        M['LCS'] = M['TC']
-
-    print("POINT 4")
-
     # SAFETY CHECK
     if H is None:
         return None, pd.DataFrame()
 
     # PATCH: if all LCS are 0 (common with OpenAlex due to URL-based references),
     # return empty result immediately instead of hanging.
-        M = H['M']
-
-        # OpenAlex fallback
-    if 'LCS' not in M.columns:
-        M['LCS'] = M['TC']
-
-    if M['LCS'].sum() == 0:
-        M['LCS'] = M['TC']
+    M = H['M']
+    if 'LCS' not in M.columns or M['LCS'].sum() == 0:
+        return None, pd.DataFrame()
 
     # ENSURE REQUIRED OUTPUT COLUMNS
     required_output_cols = ['AU', 'LCS']
@@ -128,9 +102,7 @@ def get_local_cited_authors(df, num_of_cited_authors, fast_search=False):
     )
 
     # SPLIT AUTHORS
-    print("POINT 5")
     AU = M['AU'].explode()
-    print("POINT 6")
 
     # REMOVE EMPTY AUTHORS
     AU = AU[
@@ -348,18 +320,16 @@ def get_local_cited_authors(df, num_of_cited_authors, fast_search=False):
         coloraxis_showscale=False,
     )
 
-    fig = go.Figure(fig)
+    fig = go.FigureWidget(fig)
 
-    #fig._config = fig._config | {
-    #   'modeBarButtonsToRemove': [
-    #        'pan',
-    #        'select',
-    #        'lasso2d',
-    #        'toImage'
-    #    ],
-    #    'displaylogo': False
-    #}
-    
-    print("POINT 8")
-    print(type(fig))
+    fig._config = fig._config | {
+        'modeBarButtonsToRemove': [
+            'pan',
+            'select',
+            'lasso2d',
+            'toImage'
+        ],
+        'displaylogo': False
+    }
+
     return fig, table_located_authors

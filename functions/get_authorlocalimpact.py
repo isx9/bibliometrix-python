@@ -13,7 +13,13 @@ def get_authors_local_impact(df, num_of_authors_local_impact, author_local_impac
     Returns:
         A Plotly figure object and a DataFrame of the most impactful sources.
     """
-    df = df.get()
+    # PATCH: original code called df.get() without arguments, which crashes
+    # on a pandas DataFrame because pandas .get() requires a column name.
+    # Fixed by checking isinstance(df, pd.DataFrame) first.
+    if isinstance(df, pd.DataFrame):
+        df = df.copy()
+    else:
+        df = df.get()
     today = pd.Timestamp.now().year
 
     # Ensure 'TC' and 'PY' are numeric
