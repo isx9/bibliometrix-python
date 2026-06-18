@@ -8,7 +8,7 @@ def get_local_cited_authors(df, num_of_cited_authors, fast_search=False):
 
     # SAFETY CHECK
     if df is None:
-        return None, pd.DataFrame()
+        return go.FigureWidget(go.Figure()), pd.DataFrame()
 
     # ENSURE SR EXISTS
     _df = df.get() if hasattr(df, 'get') and not isinstance(df, pd.DataFrame) else df
@@ -20,7 +20,7 @@ def get_local_cited_authors(df, num_of_cited_authors, fast_search=False):
 
     # EMPTY CHECK
     if M is None or M.empty:
-        return None, pd.DataFrame()
+        return go.FigureWidget(go.Figure()), pd.DataFrame()
 
     # REQUIRED COLUMNS
     required_cols = ['AU', 'TC']
@@ -73,13 +73,13 @@ def get_local_cited_authors(df, num_of_cited_authors, fast_search=False):
 
     # SAFETY CHECK
     if H is None:
-        return None, pd.DataFrame()
+        return go.FigureWidget(go.Figure()), pd.DataFrame()
 
     # PATCH: if all LCS are 0 (common with OpenAlex due to URL-based references),
     # return empty result immediately instead of hanging.
     M = H['M']
     if 'LCS' not in M.columns or M['LCS'].sum() == 0:
-        return None, pd.DataFrame()
+        return go.FigureWidget(go.Figure()), pd.DataFrame()
 
     # ENSURE REQUIRED OUTPUT COLUMNS
     required_output_cols = ['AU', 'LCS']
@@ -111,7 +111,7 @@ def get_local_cited_authors(df, num_of_cited_authors, fast_search=False):
 
     # EMPTY CHECK
     if len(AU) == 0:
-        return None, pd.DataFrame()
+        return go.FigureWidget(go.Figure()), pd.DataFrame()
 
     n = AU.groupby(level=0).size()
 
@@ -139,7 +139,7 @@ def get_local_cited_authors(df, num_of_cited_authors, fast_search=False):
 
     # EMPTY CHECK
     if author_counts.empty:
-        return None, pd.DataFrame()
+        return go.FigureWidget(go.Figure()), pd.DataFrame()
 
     # LIMIT AUTHORS
     num_of_cited_authors = min(
