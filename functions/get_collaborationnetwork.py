@@ -61,17 +61,12 @@ def get_collaboration_network(
         if "AU_UN" not in m.columns:
             M = metaTagExtraction(M, Field="AU_UN")
 
-        print("COL_UN nodes param:", nodes)
-        print("AU_UN sample after extraction:", M["AU_UN"].iloc[0][:100] if "AU_UN" in M.columns else "MISSING")
-
         NetRefs = biblionetwork(
             M,
             analysis="collaboration",
             network="universities",
             n=nodes
         )
-
-        print("NetRefs is None?", NetRefs is None)
 
         Title = "Edu Collaboration network"
 

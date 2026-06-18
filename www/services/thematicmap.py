@@ -95,18 +95,15 @@ def thematic_map(df, field="ID", n=250, minfreq=5, ngrams=1, stemming=False, siz
                 'freq': x['sC'].sum(),
                 'cluster_label': x.loc[x['sC'].idxmax(), 'words'],
                 'sC': list(x['sC']),
-                # PATCH: keep words as a real list instead of join()/split(', ')
-                # round-tripping through a string. If any individual word
-                # contains a comma (common in free-text keyword sources like
-                # PubMed), the old split(', ') produced a different number of
-                # elements than the original list, causing explode(['words','sC'])
-                # to crash with "columns must have matching element counts".
-                'words': list(x['words'].astype(str)),
+                'words': ', '.join(x['words'].astype(str)),
                 'color': x['color'].iloc[0]
             }))
             .reset_index())
 
-    df_lab = df_lab.explode(['words', 'sC']).reset_index(drop=True)
+    df_lab = df_lab.assign(
+        words=df_lab['words'].str.split(', '),
+        sC=df_lab['sC']
+    ).explode(['words', 'sC']).reset_index(drop=True)
 
     index_names = sEij.index
     column_names = sEij.columns

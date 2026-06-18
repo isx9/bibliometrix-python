@@ -155,22 +155,6 @@ def get_co_citation(
             go.FigureWidget(go.Figure())
         )
 
-    # PATCH: network_plot() can return None directly (not just raise) for
-    # small/degenerate networks, e.g. when remove_isolates strips out most
-    # nodes. The try/except above only catches exceptions, not a clean None
-    # return, so cocitnet could reach here as None and crash on the dict-like
-    # check below. Guard against that explicitly.
-    if cocitnet is None:
-
-        print("network_plot returned None (degenerate network)")
-
-        return (
-            None,
-            go.FigureWidget(go.Figure()),
-            pd.DataFrame(),
-            go.FigureWidget(go.Figure())
-        )
-
     # Validate graph object
     if "graph" not in cocitnet:
 

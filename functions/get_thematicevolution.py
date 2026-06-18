@@ -26,21 +26,6 @@ def get_thematic_evolution(df, field="ID", years=None, n=250, weight_index="inc_
     Returns:
         dict: Results of the thematic evolution analysis.
     """
-    df = df.get() if hasattr(df, 'get') and callable(df.get) and not isinstance(df, pd.DataFrame) else df
-    
-    def _is_empty_cell(x):
-        if isinstance(x, list):
-            return len(x) == 0
-        if isinstance(x, str):
-            return x.strip() in ("", "[]")
-        return x is None or (isinstance(x, float) and pd.isna(x))
-
-    if field not in df.columns or df[field].apply(_is_empty_cell).all():
-        print(f"Error: field '{field}' has no content in this dataset "
-              f"(likely WoS-exclusive or unavailable for this data source). "
-              f"Try a different text source, e.g. 'DE' (Author Keywords).")
-        return None, pd.DataFrame(), None
-        
     results = thematic_evolution(
         M=df,
         field=field,
@@ -57,14 +42,11 @@ def get_thematic_evolution(df, field="ID", years=None, n=250, weight_index="inc_
         cluster=cluster
     )
 
-
-
     # PATCH: thematic_evolution returns None when PY is all NaN (e.g. PubMed)
     # or when no topics are found — return empty results gracefully.
     if results is None:
         return None, pd.DataFrame(), None
-    if results.get("check") is False:
-        return None, pd.DataFrame(), None
+    
     nodes = results['Nodes']
     edges = results['Edges']
     label_size = int(size * 20)
@@ -115,13 +97,6 @@ def thematic_evolution(M, field="ID", years=None, n=250, min_freq=2, size=0.5, n
     Y = []
 
     for interval_label, Mk in list_df.items():
-        # PATCH: skip time slices with zero documents. This happens whenever
-        # a user-chosen cutting year falls outside the dataset's actual year
-        # range (e.g. cutting at 2019 on a dataset spanning only 2025-2026),
-        # producing an empty bin that previously crashed on min()/max() of
-        # an empty Series.
-        if Mk.empty:
-            continue
         Y.append(f"{min(Mk['PY'])}-{max(Mk['PY'])}")
 
 
@@ -160,15 +135,10 @@ def thematic_evolution(M, field="ID", years=None, n=250, min_freq=2, size=0.5, n
         res.append(resk)
         net.append(resk['net_html'])
 
-    # PATCH 4: K must reflect the number of slices that actually produced
-    # a result, not the original list_df count. Previously K was based on
-    # list_df before empty slices were skipped in the loop above, so if any
-    # slice was empty, K stayed too high and the later `res[k]` indexing
-    # crashed with IndexError since res had fewer entries than K implied.
-    K = len(res)
+    K = len(list_df)
 
     if K < 2:
-        print("Error: fewer than 2 valid time slices with data for this field.")
+        print("Error")
         return None
 
     # PATCH 3: inc_matrix was being concatenated inside the loop, so INC,
@@ -343,13 +313,7 @@ def timeslice(M, breaks=None, k=5):
     if breaks is None or (isinstance(breaks, list) and len(breaks) == 0):
         breaks = np.floor(np.linspace(M['PY'].min() - 1, M['PY'].max(), k + 1))
     else:
-        # PATCH: sort and dedupe breaks before binning. Previously this just
-        # concatenated [min-1] + user_breaks + [max] in that fixed order,
-        # which produces non-monotonic bins whenever a user-chosen cutting
-        # year falls outside the dataset's actual year range (e.g. a 2019
-        # cutoff on a dataset spanning only 2025-2026), crashing pd.cut()
-        # with "bins must increase monotonically".
-        breaks = sorted(set([M['PY'].min() - 1] + breaks + [M['PY'].max()]))
+        breaks = [M['PY'].min() - 1] + breaks + [M['PY'].max()]
         print("breaks:", breaks)
         M = M.dropna(subset=['PY'])
         M['interval'] = pd.cut(M['PY'], bins=breaks, right=False)

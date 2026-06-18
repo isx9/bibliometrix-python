@@ -10,7 +10,7 @@ def get_main_informations(df, log=False):
     # PATCH: original code called df.get() without arguments, which crashes on a
     # plain pandas DataFrame because pandas .get() requires a column name as argument.
     # Fixed by checking isinstance(df, pd.DataFrame) first.
-    data = (df if isinstance(df, pd.DataFrame) else df.get()).copy()
+    data = df if isinstance(df, pd.DataFrame) else df.get()
 
     #### Min and Max Year ####
     start_time = time.time()
@@ -161,7 +161,7 @@ def get_main_informations(df, log=False):
 
     if "AU_CO" not in data.columns:
 
-        data = metaTagExtraction(data, "AU_CO")
+        data = metaTagExtraction(df, "AU_CO")
 
     data["AU_CO"] = data["AU_CO"].apply(
         lambda x: x if isinstance(x, list) else []

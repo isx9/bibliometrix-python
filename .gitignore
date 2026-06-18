@@ -1,4 +1,7 @@
+.venv/
 __pycache__/
-bibliovenv/
-Bibenv/
-.idea/
+*.pyc
+ .DS_Store
+**/.ipynb_checkpoints/
+__pycache__/
+.venv/

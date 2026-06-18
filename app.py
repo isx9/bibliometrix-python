@@ -6194,9 +6194,7 @@ with ui.tags.div(id="mainContent", class_="main-content"):
                                                     label_size, n_labels, repulsion, cluster)
                             thematic_map_results.set(result)
                         except Exception as e:
-                            import traceback
-                            traceback.print_exc()
-                            ui.notification_show(f"❌ Error in analysis: {str(e)} ({type(e).__name__})", type="error", duration=10)
+                            ui.notification_show(f"❌ Error in analysis: {str(e)}", type="error", duration=10)
                         finally:
                             ui.modal_remove()
 
@@ -6530,9 +6528,7 @@ with ui.tags.div(id="mainContent", class_="main-content"):
                             result = get_thematic_evolution(df, field, years, n, weight_index, min_weight_index, minfreq, label_size, ngrams, stemming, n_labels, overlap, remove_terms, synonyms, cluster)
                             thematic_evolution_results.set(result)
                         except Exception as e:
-                            import traceback
-                            traceback.print_exc()
-                            ui.notification_show(f"❌ Error in analysis: {str(e)} ({type(e).__name__})", type="error", duration=10)
+                            ui.notification_show(f"❌ Error in analysis: {str(e)}", type="error", duration=10)
                         finally:
                             ui.modal_remove()
                             
@@ -7337,9 +7333,7 @@ with ui.tags.div(id="mainContent", class_="main-content"):
                             # Store results
                             co_citation_network_results.set(result)
                         except Exception as e:
-                            import traceback
-                            traceback.print_exc()
-                            ui.notification_show(f"❌ Error in analysis: {str(e)} ({type(e).__name__})", type="error", duration=10)
+                            ui.notification_show(f"❌ Error in analysis: {str(e)}", type="error", duration=10)
                         finally:
                             ui.modal_remove()
 

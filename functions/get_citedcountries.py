@@ -54,12 +54,6 @@ def get_cited_countries(df, num_of_cited_countries, cited_countries_measure):
     x_values = tab.iloc[:, 1]
     n = len(tab)
 
-    # PATCH: moved earlier — must check before building the scatter trace,
-    # since x_values.max() being NaN crashes the marker size calculation
-    # immediately on add_trace(), before the later guard is ever reached.
-    if x_values.empty or pd.isna(x_values.max()) or x_values.max() == 0:
-        return go.FigureWidget(go.Figure()), pd.DataFrame()
-
     fig = go.Figure()
 
     # Add thick lines from y-label to marker

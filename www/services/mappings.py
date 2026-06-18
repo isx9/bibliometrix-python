@@ -36,9 +36,7 @@ PUBMED_MAPPING = {
 # C1  - affiliations not in eSummary
 # DE  - author keywords not in eSummary
 # ID  - Keywords Plus, WoS-exclusive, always []
-# TC  - times cited not in eSummary; backfilled from NIH iCite by PMID
-#       (see api_retriever.fetch_pubmed_icite()). Falls back to 0 only
-#       if iCite has no data for a given PMID (e.g. very recent papers).
+# TC  - times cited not in eSummary, always 0
 # SR  - calculated field, computed last
 
 # ---------------------------------------------------------------------------
