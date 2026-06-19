@@ -89,11 +89,75 @@ def SR(M):
     return M
 
 
+def _pubmed_cr_is_journal_only(ref):
+    """
+    Detects PubMed's NLM-style abbreviated citation, which carries no
+    author list, e.g. 'Nat Hum Behav. 2019 Oct;3(10):1045-1046. doi: ...'.
+    PubMed's CR field also contains full reference-list citations (with
+    authors, e.g. 'Waudby, C. A., Dobson, C. M. ... (2019).'), so this
+    check lets CR_AU/CR_SO route each entry to the right extractor instead
+    of assuming one WoS-style format for everything.
+
+    A real NLM journal abbreviation never contains a comma, but some
+    APA-style author citations ('Carlsson, G. 2009. "Topology and
+    Data."...') accidentally match the same period-then-year shape. The
+    comma check filters those out so they aren't mistaken for a journal
+    name.
+    """
+    m = re.match(r'^([^.]+)\.\s+\d{4}\b', ref)
+    return bool(m) and ',' not in m.group(1)
+
+
+def _pubmed_cr_source(ref):
+    """
+    Extracts the journal/source name from a PubMed NLM-style abbreviated
+    citation (the text before the first period). Only meaningful when
+    _pubmed_cr_is_journal_only(ref) is True — full reference-list
+    citations are deliberately not handled here, since their journal name
+    sits after the title text and can't be reliably isolated from it with
+    a simple pattern (the title itself often contains periods).
+    """
+    m = re.match(r'^([^.]+)\.', ref)
+    return m.group(1).strip() if m else None
+
+
+def _pubmed_cr_first_author(ref):
+    """
+    Extracts the first author's surname from a PubMed full reference-list
+    citation, e.g. 'Waudby, C. A., Dobson, C. M. & Christodoulou, J. ...
+    (2019).' — the surname always precedes the first comma in this shape.
+    Guarded on two conditions so it doesn't misfire on the journal-only
+    shape (which has no author at all) or on unrelated comma-containing
+    fragments: the string must not be journal-only, and must end in a
+    parenthesised year, which is the reliable marker of this citation
+    style.
+    """
+    if _pubmed_cr_is_journal_only(ref):
+        return None
+    if not re.search(r'\(\d{4}\)\.?\s*$', ref):
+        return None
+    m = re.match(r'^([^,]+),', ref)
+    return m.group(1).strip() if m else None
+
+
 def CR_AU(M):
     listCAU = M["CR"].apply(
         lambda x: x if isinstance(x, list) else []
     ).apply(lambda l: [x for x in l if len(x) > 10])
-    FCAU = listCAU.apply(lambda l: [x.split(",")[0].strip() for x in l])
+
+    # PATCH 8: PubMed's CR field mixes formats that the original WoS-style
+    # split(",")[0] logic handles badly — it returns the whole string
+    # (mistaken for an author) on the journal-only NLM shape, which has no
+    # comma at all, and the wrong fragment on this dataset's Nature-style
+    # reference-list shape. PUBMED now routes through a dedicated
+    # extractor; all other databases keep the original WoS logic.
+    if M["DB"].iloc[0].upper() == "PUBMED":
+        FCAU = listCAU.apply(
+            lambda l: [a for a in (_pubmed_cr_first_author(x) for x in l) if a]
+        )
+    else:
+        FCAU = listCAU.apply(lambda l: [x.split(",")[0].strip() for x in l])
+
     M["CR_AU"] = FCAU.apply(lambda l: ";".join(l))
 
     return M
@@ -102,13 +166,30 @@ def CR_AU(M):
 def CR_SO(M):
     listCAU = M["CR"].apply(lambda x: x if isinstance(x, list) else [])
 
-    if M["DB"].iloc[0].upper() != "SCOPUS":
+    if M["DB"].iloc[0].upper() == "SCOPUS":
         FCAU = listCAU.apply(
-            lambda l: [x.split(",")[2].strip() for x in l if len(x.split(",")) > 2]
+            lambda l: [x.split(",")[0].strip() for x in l if len(x.split(",")) > 2]
+        )
+    elif M["DB"].iloc[0].upper() == "PUBMED":
+        # PATCH 9: PubMed's CR field isn't comma-delimited like WoS, so
+        # x.split(",")[2] either grabs the wrong fragment or skips the
+        # entry outright (fewer than 3 commas). The source name is only
+        # unambiguous on the journal-only NLM shape (text before the
+        # first period); reference-list citations are skipped here rather
+        # than guessed at, since their journal name can't be reliably
+        # separated from the title text.
+        FCAU = listCAU.apply(
+            lambda l: [
+                s for s in (
+                    _pubmed_cr_source(x) for x in l
+                    if _pubmed_cr_is_journal_only(x)
+                )
+                if s
+            ]
         )
     else:
         FCAU = listCAU.apply(
-            lambda l: [x.split(",")[0].strip() for x in l if len(x.split(",")) > 2]
+            lambda l: [x.split(",")[2].strip() for x in l if len(x.split(",")) > 2]
         )
 
     # PATCH 2: originale usava None per righe vuote (lambda l: ";".join(l) if l else None).
