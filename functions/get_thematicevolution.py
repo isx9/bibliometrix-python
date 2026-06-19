@@ -43,10 +43,41 @@ def get_thematic_evolution(df, field="ID", years=None, n=250, weight_index="inc_
     )
 
     # PATCH: thematic_evolution returns None when PY is all NaN (e.g. PubMed)
-    # or when no topics are found — return empty results gracefully.
+    # or when no topics are found. Generate a valid but empty network graph
+    # instead of returning None for html_path (which the UI shows as "Not Found").
     if results is None:
-        return None, pd.DataFrame(), None
-    
+        print(f"No valid data to build thematic evolution for field '{field}'.")
+        empty_net = Network(height="98vh", width="100%", notebook=True, cdn_resources="in_line", directed=True)
+        empty_net.toggle_physics(False)
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".html")
+        html_path = tmp.name
+        with open(html_path, 'w', encoding="utf-8") as f:
+            f.write(empty_net.generate_html())
+        return html_path.split(os.sep)[-1], pd.DataFrame(), []
+
+    # PATCH: thematic_evolution can also return {"check": False} (no 'Nodes' key)
+    # when one or more periods have zero topic clusters — typically because the
+    # chosen field is empty for the data source (e.g. "ID" / Keywords Plus is
+    # WoS-only and is always empty for OpenAlex/PubMed records). Without this
+    # check, results['Nodes'] below would raise KeyError: 'Nodes'.
+    # → instead of returning None (which the UI shows as "Not Found"), generate
+    # a valid but empty network graph so the Map tab renders a blank canvas.
+    if not results.get("check", True) or "Nodes" not in results:
+        print(
+            f"No topics could be extracted for field '{field}' in one or more time "
+            f"periods. This is usually because the selected field is empty for your "
+            f"data source (e.g. Keywords Plus 'ID' is exclusive to Web of Science and "
+            f"is always empty for OpenAlex/PubMed data). Try a different Text Source "
+            f"(e.g. 'TI', 'AB', or 'DE')."
+        )
+        empty_net = Network(height="98vh", width="100%", notebook=True, cdn_resources="in_line", directed=True)
+        empty_net.toggle_physics(False)
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".html")
+        html_path = tmp.name
+        with open(html_path, 'w', encoding="utf-8") as f:
+            f.write(empty_net.generate_html())
+        return html_path.split(os.sep)[-1], pd.DataFrame(), []
+
     nodes = results['Nodes']
     edges = results['Edges']
     label_size = int(size * 20)
@@ -315,9 +346,23 @@ def timeslice(M, breaks=None, k=5):
     else:
         breaks = [M['PY'].min() - 1] + breaks + [M['PY'].max()]
         print("breaks:", breaks)
-        M = M.dropna(subset=['PY'])
-        M['interval'] = pd.cut(M['PY'], bins=breaks, right=False)
-    
+
+    # PATCH: remove duplicate/out-of-order break points. This happens when the
+    # user-chosen Cutting Year coincides with (or is outside) the dataset's
+    # min/max year, which previously caused pd.cut() to raise
+    # "bins must increase monotonically". If after deduplication there aren't
+    # enough edges left to form at least 2 periods, return {} gracefully
+    # instead of crashing — callers already handle an empty dict by showing
+    # an empty result instead of an error.
+    breaks = sorted(set(breaks))
+    if len(breaks) < 3:
+        print(
+            f"Cutting Year(s) too close to (or outside) the dataset's year range "
+            f"{breaks}. Cannot build at least 2 time periods — choose a Cutting "
+            f"Year strictly inside the data range."
+        )
+        return {}
+
     # PATCH: drop NaN PY rows before cutting to avoid non-monotonic bin errors.
     M = M.dropna(subset=['PY'])
     M['interval'] = pd.cut(M['PY'], bins=breaks, right=False)
@@ -329,6 +374,22 @@ def timeslice(M, breaks=None, k=5):
         str(interval): M[M['interval'] == interval].drop(columns=['interval'])
         for interval in intervals
     }
+
+    # PATCH: drop empty periods. A valid (non-duplicate) bin can still contain
+    # zero rows — e.g. when the Cutting Year falls outside the actual data
+    # range, the period between the out-of-range edges and the real data start
+    # is "valid" for pd.cut but empty. Downstream code (e.g. min()/max() on
+    # each period's PY values) crashes on an empty sequence if this isn't
+    # filtered out here.
+    split_df = {label: sub_df for label, sub_df in split_df.items() if not sub_df.empty}
+
+    if len(split_df) < 2:
+        print(
+            f"Only {len(split_df)} non-empty time period(s) found for the chosen "
+            f"Cutting Year(s). At least 2 are required for thematic evolution — "
+            f"choose a Cutting Year strictly inside the dataset's year range."
+        )
+        return {}
 
     return split_df
 

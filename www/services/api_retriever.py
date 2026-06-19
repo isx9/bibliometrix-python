@@ -51,10 +51,13 @@ def fetch_openalex(query: str, total_wanted: int = 100, per_page: int = 25) -> l
     return all_results[:total_wanted]
 
 
-def fetch_pubmed_ids(query: str, total_wanted: int = 100) -> list:
+def fetch_pubmed_ids(query: str, total_wanted: int = 100, mindate: str = None, maxdate: str = None) -> list:
     """
     Searches PubMed for a query and returns a list of PubMed IDs (PMIDs).
     PubMed requires two steps: first get IDs, then fetch paper details.
+    If mindate/maxdate are provided, restricts the search to that
+    publication-date range (format: "YYYY"), so results are spread
+    across multiple years instead of defaulting to the most recent ones.
     Returns a list of PMID strings.
     """
     url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
@@ -64,20 +67,27 @@ def fetch_pubmed_ids(query: str, total_wanted: int = 100) -> list:
         "retmax": total_wanted,
         "retmode": "json"
     }
+    if mindate and maxdate:
+        params["datetype"] = "pdat"
+        params["mindate"] = mindate
+        params["maxdate"] = maxdate
+
     data = fetch_page(url, params)
     if data is None:
         return []
     return data["esearchresult"]["idlist"]
 
 
-def fetch_pubmed(query: str, total_wanted: int = 100) -> list:
+def fetch_pubmed(query: str, total_wanted: int = 100, mindate: str = None, maxdate: str = None) -> list:
     """
     Fetches paper details from PubMed for a given query.
     First retrieves PMIDs via fetch_pubmed_ids(), then fetches
     paper summaries in batches of 20.
+    If mindate/maxdate are provided (format: "YYYY"), restricts results
+    to that publication-date range.
     Returns a list of raw paper dictionaries.
     """
-    ids = fetch_pubmed_ids(query=query, total_wanted=total_wanted)
+    ids = fetch_pubmed_ids(query=query, total_wanted=total_wanted, mindate=mindate, maxdate=maxdate)
     if not ids:
         print("No PubMed IDs found. Stopping.")
         return []
@@ -107,11 +117,15 @@ def fetch_pubmed(query: str, total_wanted: int = 100) -> list:
     return all_results[:total_wanted]
 
 
-def retrieve(query: str, platform: str = "openalex", total: int = 100) -> list:
+def retrieve(query: str, platform: str = "openalex", total: int = 100, mindate: str = None, maxdate: str = None) -> list:
     """
     Main entry point for the API retriever.
     Takes a search query and platform selection from the user.
     Returns a list of raw paper dictionaries ready for standardizer.py.
+
+    mindate/maxdate (format: "YYYY") are currently only applied to the
+    "pubmed" platform, to spread results across a publication-year
+    range instead of defaulting to the most recent ones.
 
     Supported platforms: "openalex", "pubmed"
     """
@@ -119,7 +133,7 @@ def retrieve(query: str, platform: str = "openalex", total: int = 100) -> list:
         return fetch_openalex(query=query, total_wanted=total)
     
     elif platform == "pubmed":
-        return fetch_pubmed(query=query, total_wanted=total)
+        return fetch_pubmed(query=query, total_wanted=total, mindate=mindate, maxdate=maxdate)
     
     else:
         raise ValueError(f"Unsupported platform: {platform}. Choose 'openalex' or 'pubmed'.")
