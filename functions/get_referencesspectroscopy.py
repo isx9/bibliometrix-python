@@ -68,11 +68,51 @@ def get_references_spectroscopy(df, start_year, end_year=2005, field_separator_s
     )
 
     # ---------------- SAFE YEAR EXTRACTION PATCH ----------------
+    # PATCH: the original regex (r'\b\d{4},') only matches WoS-style short
+    # references where the year sits between commas, e.g.
+    # 'SMITH J, 2019, NATURE, ...'. PubMed's CR field uses other shapes
+    # this never anticipated:
+    #   - NLM abbreviated citation: year right after the first period,
+    #     e.g. 'Nat Hum Behav. 2019 Oct;3(10):1045-1046. doi: ...'.
+    #   - Reference-list citation: year in parentheses at the very end,
+    #     e.g. '...Trends Biochem. Sci 44, 914-926 (2019).'.
+    #   - Vancouver-style citation: year right after the last comma at
+    #     the very end, e.g. '...Bioengineering. 10(12):1435, 2023.'.
+    # The last shape is dangerous for the original WoS pattern: a 4-digit
+    # page number followed by a comma (e.g. '...1435,') gets mistaken for
+    # the year, when the real year is the one after it. So the two
+    # end-anchored PubMed shapes are checked first (unambiguous, since the
+    # year is the last thing in the string), and the permissive mid-string
+    # WoS pattern is only tried as a last resort. A sanity bound on the
+    # plausible range catches anything that still slips through.
+    current_year_bound = pd.Timestamp.now().year + 1
+
+    def _extract_cited_year(ref):
+
+        def _in_range(y):
+            return 1500 <= y <= current_year_bound
+
+        m = re.search(r',\s*(\d{4})\.?\s*$', ref)
+        if m and _in_range(int(m.group(1))):
+            return int(m.group(1))
+
+        m = re.search(r'\((\d{4})\)\.?\s*$', ref)
+        if m and _in_range(int(m.group(1))):
+            return int(m.group(1))
+
+        m = re.match(r'^[^.]+\.\s+(\d{4})\b', ref)
+        if m and _in_range(int(m.group(1))):
+            return int(m.group(1))
+
+        m = re.search(r'\b(\d{4}),', ref)
+        if m and _in_range(int(m.group(1))):
+            return int(m.group(1))
+
+        return 0
+
     cited_years = references.apply(
         lambda refs: [
-            int(re.findall(r'\b\d{4},', ref)[0][:-1])
-            if re.findall(r'\b\d{4},', ref)
-            else 0
+            _extract_cited_year(ref)
             for ref in refs
         ]
         if isinstance(refs, list)

@@ -46,7 +46,7 @@ def get_co_citation(
 
         elif field == "CR_AU":
 
-            if "CR_AU" not in M.get().columns:
+            if "CR_AU" not in M.columns:
                 M = metaTagExtraction(M, Field="CR_AU", sep=sep)
 
             NetRefs = biblionetwork(
@@ -61,7 +61,7 @@ def get_co_citation(
 
         elif field == "CR_SO":
 
-            if "CR_SO" not in M.get().columns:
+            if "CR_SO" not in M.columns:
                 M = metaTagExtraction(M, Field="CR_SO", sep=sep)
 
             NetRefs = biblionetwork(
@@ -147,6 +147,22 @@ def get_co_citation(
     except Exception as e:
 
         print(f"network_plot failed: {e}")
+
+        return (
+            None,
+            go.FigureWidget(go.Figure()),
+            pd.DataFrame(),
+            go.FigureWidget(go.Figure())
+        )
+
+    # PATCH: network_plot() can return None directly (not just raise) for
+    # small/degenerate networks, e.g. when remove_isolates strips out most
+    # nodes. The try/except above only catches exceptions, not a clean None
+    # return, so cocitnet could reach here as None and crash on the dict-like
+    # check below. Guard against that explicitly.
+    if cocitnet is None:
+
+        print("network_plot returned None (degenerate network)")
 
         return (
             None,
