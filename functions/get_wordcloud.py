@@ -134,6 +134,11 @@ def table_tag(df, tag, ngrams=1, remove_terms=None, synonyms=None):
                                     ngrams=ngrams, remove_terms=remove_terms, synonyms=synonyms)
         text_data = text_data[f"{tag}_TM"]
     else:
+        # PATCH: some tags (e.g. 'WC' - Subject Categories) are not present at all
+        # in the standardized schema for non-WoS sources (OpenAlex, PubMed).
+        # Return an empty result instead of raising a raw KeyError.
+        if tag not in M.columns:
+            return Counter()
         text_data = M[tag]
 
     # Handle list columns (DE and ID)

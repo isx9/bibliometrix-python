@@ -30,6 +30,21 @@ def get_trend_topics(df, ngram, field_tt, time_window, file_upload_terms_tt, fil
     df_plain = df.get() if hasattr(df, 'get') and callable(df.get) and not isinstance(df, pd.DataFrame) else df
 
     if field_tt in ["TI", "AB"]:
+        # PATCH: missing abstracts/titles sometimes arrive as the literal
+        # string "nan" rather than a true NaN (e.g. after a CSV/JSON
+        # round-trip). term_extraction() would otherwise tokenize that
+        # string as a real word, producing a fake "NAN" term that drowns
+        # out or masks the genuine terms. Drop both true NaN and the
+        # literal "nan" string (case-insensitive, ignoring whitespace)
+        # before extracting terms.
+        df_plain = df_plain[df_plain[field_tt].notna()]
+        df_plain = df_plain[
+            ~df_plain[field_tt].astype(str).str.strip().str.lower().eq('nan')
+        ]
+
+        if df_plain.empty:
+            return go.FigureWidget(go.Figure()), pd.DataFrame()
+
         df_plain = term_extraction(df_plain, field=field_tt, stemming=False, verbose=False,
                                    ngrams=ngrams, remove_terms=remove_terms, synonyms=synonyms)
         field = f"{field_tt}_TM"
@@ -97,6 +112,28 @@ def field_by_year(df, field, timespan, min_freq, n_items, remove_terms=None, syn
     # PATCH: df may be a Shiny reactive Value or a plain DataFrame
     df = df.get() if hasattr(df, 'get') and callable(df.get) and not isinstance(df, pd.DataFrame) else df
     df = df.copy()
+
+    # PATCH: documents with a missing/empty value for the analysed field (e.g. no
+    # abstract, or an empty term list after extraction) must not be passed to
+    # cocMatrix(). Otherwise the missing value gets tokenized as the literal
+    # string "nan" and shows up as a fake "NAN" term in the plot, drowning out
+    # or masking the real terms.
+    df = df.dropna(subset=[field])
+    df = df[df[field].apply(lambda x: len(x) > 0 if isinstance(x, (list, str)) else bool(x))]
+
+    # PATCH: strip any stray literal "nan" tokens that may have survived
+    # inside extracted term lists (case-insensitive), then drop rows that
+    # become empty as a result.
+    def _strip_nan_tokens(x):
+        if isinstance(x, list):
+            return [t for t in x if str(t).strip().lower() != 'nan']
+        return x
+
+    df[field] = df[field].apply(_strip_nan_tokens)
+    df = df[df[field].apply(lambda x: len(x) > 0 if isinstance(x, (list, str)) else bool(x))]
+
+    if df.empty:
+        return pd.DataFrame()
 
     # Create co-occurrence matrix
     A = cocMatrix(df, Field=field, binary=False, remove_terms=remove_terms, synonyms=synonyms)

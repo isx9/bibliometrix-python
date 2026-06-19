@@ -46,6 +46,11 @@ def get_frequent_words(df, ngram, num_of_words, word_type, file_upload_terms, fi
     table = word_counts.sort_values(by='Occurrences', ascending=False)
     word_counts = word_counts.sort_values(by='Occurrences', ascending=False).head(num_of_words)
 
+    # PATCH: safety check if word_counts is empty — avoids building a
+    # plot (and the leftover-bubble UI glitch) from an empty DataFrame.
+    if word_counts.empty:
+        return go.FigureWidget(go.Figure()), table
+
     # Create plot
     fig = px.scatter(
         word_counts,
@@ -115,6 +120,22 @@ def table_tag(df, tag, ngrams=1, remove_terms=None, synonyms=None):
     if tag in ['AB', 'TI']:
         # PATCH: pass plain DataFrame to term_extraction — it does not accept reactives
         df_plain = df.get() if hasattr(df, 'get') and callable(df.get) and not isinstance(df, pd.DataFrame) else df
+
+        # PATCH: missing abstracts/titles sometimes arrive as the literal
+        # string "nan" rather than a true NaN (e.g. after a CSV/JSON
+        # round-trip). term_extraction() would otherwise tokenize that
+        # string as a real word, producing a fake "nan" term that drowns
+        # out or masks the genuine terms. Drop both true NaN and the
+        # literal "nan" string (case-insensitive, ignoring whitespace)
+        # before extracting terms.
+        df_plain = df_plain[df_plain[tag].notna()]
+        df_plain = df_plain[
+            ~df_plain[tag].astype(str).str.strip().str.lower().eq('nan')
+        ]
+
+        if df_plain.empty:
+            return {}
+
         try:
             text_data = term_extraction(df_plain, field=tag, stemming=False, verbose=False,
                                     ngrams=ngrams, remove_terms=remove_terms, synonyms=synonyms)
@@ -122,6 +143,11 @@ def table_tag(df, tag, ngrams=1, remove_terms=None, synonyms=None):
             return {}
         text_data = text_data[f"{tag}_TM"]
     else:
+        # PATCH: some tags (e.g. 'WC' - Subject Categories) are not present at all
+        # in the standardized schema for non-WoS sources (OpenAlex, PubMed).
+        # Return an empty result instead of raising a raw KeyError.
+        if tag not in M.columns:
+            return {}
         text_data = M[tag]
 
     # Handle list columns (DE and ID)
@@ -142,12 +168,15 @@ def table_tag(df, tag, ngrams=1, remove_terms=None, synonyms=None):
         words = text_data.dropna().astype(str).str.cat(sep=', ').upper()
         words = [word.strip() for word in words.split(',') if word and word.strip()]
     else:
-        # PATCH: filter only list elements before iterating to avoid TypeError on None or str
+        # PATCH: filter only list elements before iterating to avoid TypeError on None or str,
+        # and strip any stray literal "nan" tokens (case-insensitive) that may
+        # have survived inside the extracted term lists.
         words = [
             item
             for sublist in text_data
             if isinstance(sublist, list)
             for item in sublist
+            if str(item).strip().lower() != 'nan'
         ]
 
     # Replace synonyms
