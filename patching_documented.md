@@ -272,6 +272,9 @@
 4. filter with `isinstance(sublist, list)` before iterating — avoids TypeError on None or str in TI/AB path
 5. `remove_terms` applied to all tags, not just DE/ID — fixes silent bug where stopword removal was skipped for TI/AB
 6. wrapped `term_extraction()` call in `try/except ValueError` — returns `{}` when vocabulary is empty
+7. table_tag — missing-column guard for non-WoS-proprietary fields (e.g. WC): same fix as above — if tag not in M.columns: return {} before direct column access. Fixes Error in analysis: 'WC'.
+8. table_tag — literal "nan" string filtering for AB/TI fields: same root cause and fix as in get_treemap.py — drop rows where the field is NaN or the literal string "nan" before term_extraction(), plus stray-token stripping in the extracted list. Fixes a leftover "nan" bubble (200 occurrences, 100%) shown on Abstracts.
+9. get_frequent_words — empty-result safety guard before plotting: this file was missing the if word_counts.empty: return ... check already present in get_wordcloud.py and get_treemap.py. Without it, an empty/degenerate result could leave a stale plot bubble visible in the UI instead of rendering cleanly empty. Fix: added the same guard, returning an empty FigureWidget and table when no words are found.
 **Known limitations:**
 - AB/PubMed returns empty results — PubMed eSummary API does not return abstracts, so the vocabulary is empty. Not an ETL bug.
 
@@ -371,44 +374,29 @@
 2. Second `df.get()` call in return statement: replaced with `data`, which is already the unwrapped DataFrame from patch 1, avoiding a redundant and potentially crashing second call.
 3. `data.map(lambda x: x == [])` → replaced with a per-column `apply` using `isinstance` check. Reason: applying a lambda cell-by-cell across the entire DataFrame raises TypeError on non-list cells (int, float) in some pandas versions. Fix: `count_empty_lists` function checks `isinstance(x, list) and len(x) == 0` safely per column.
 
-### get_thematicevolution.py
-***Status**: PASS (both sources)
-***Patches applied:**
+**Patches applied:**
 
-- Lines 93–98: removed reactive.Value(Mk) wrapper — passing Mk directly to thematic_map. Reason: reactive.Value is a Shiny-specific object that crashes outside a running Shiny application with "No current reactive context". thematic_map already handles plain DataFrames via its own isinstance check.
+- `thematic_evolution` – Lines 93–98: removed `reactive.Value(Mk)` wrapper — passing `Mk` directly to `thematic_map`. Reason: `reactive.Value` is a Shiny-specific object that crashes outside a running Shiny application with "No current reactive context". `thematic_map` already handles plain DataFrames via its own `isinstance` check.
+- `thematic_evolution` – Lines 87–88: added early return when `timeslice` returns empty dict. Reason: `timeslice` returns `{}` when `PY` is all `NaN` (PubMed), causing the subsequent for loop to silently skip and `results` to be `None`, crashing on `results['Nodes']` downstream.
+- `get_thematic_evolution` – Line 45: added `None` check on `results` after the `thematic_evolution()` call. Reason: `thematic_evolution` returns `None` when `PY` is all `NaN` or no topics are found — accessing `results['Nodes']` on `None` crashes with `TypeError`.
+- `get_thematic_evolution` – missing `'Nodes'` key guard: `thematic_evolution` can also return `{"check": False}` (no `'Nodes'` key) when one or more periods have zero topic clusters — typically because the chosen field is empty for the data source (e.g. Keywords Plus `ID` is exclusive to Web of Science and is always empty for OpenAlex/PubMed). Fix: check `not results.get("check", True) or "Nodes" not in results` before unpacking, instead of crashing with `KeyError: 'Nodes'`.
+- `get_thematic_evolution` – empty-result HTML generation: in both fallback cases above (`results` is `None` and missing `'Nodes'`), the function previously returned `None` for the HTML network path, which the UI rendered as a broken "Not Found" page. Fix: generate a valid but empty `pyvis.Network` graph (no nodes/edges) and save it as a temporary HTML file, so the Map tab renders a blank canvas instead of an error.
+- `get_thematic_evolution` – TM return value: the third return value (`TM`, consumed by the "Time Slice 1/2" tabs) was set to `None` in the fallback cases above, causing `"object of type 'NoneType' has no len()"` in the UI, which calls `len()` on it. Fix: return an empty list `[]` instead of `None`.
+- `timeslice` – NaN PY guard: if `PY` is entirely `NaN`, return `{}` gracefully instead of crashing in `pd.cut`.
+- `timeslice` – dropna before `pd.cut`: drop rows with `NaN` `PY` before cutting to avoid non-monotonic bin errors.
+- `timeslice` – sorted breaks: wrap break points with `sorted(set(breaks))` to guarantee strictly increasing, duplicate-free bin edges regardless of whether the user-provided Cutting Year falls outside the actual `PY` range of the data (previous cause of "bins must increase monotonically"). If fewer than 3 unique edges remain, return `{}` instead of calling `pd.cut`.
+- `timeslice` – empty-period guard: even after deduplication, an out-of-range Cutting Year can produce a bin that is valid for `pd.cut` but contains zero rows. Downstream code (`min()`/`max()` on each period's `PY` values) crashed with `"min() arg is an empty sequence"` on such empty periods. Fix: filter out empty sub-DataFrames after splitting; if fewer than 2 non-empty periods remain, return `{}`.
+- `normalize_to_minus1_1` – if all values are equal, return zeros instead of dividing by zero (range = 0 produces `NaN` everywhere).
+- `thematic_evolution` – `resk_tuple` unpacking: `thematic_map` returns exactly 5 values; original code tried to access index 5 which is always out of range.
+- `thematic_evolution` – `nclust` derivation: derived directly from `clusters` DataFrame row count instead of always being `None`.
+- `thematic_evolution` – `inc_matrix` accumulation: moved `pd.concat` and downstream processing outside the loop so all periods are accumulated before building the final result.
 
-- Lines 87–88: added early return when timeslice returns empty dict. Reason: timeslice returns {} when PY is all NaN (PubMed), causing the subsequent for loop to silently skip and results to be None, crashing on results['Nodes'] downstream.
+**Known limitations:**
 
-- Line 45: added None check on results after thematic_evolution call. Reason: thematic_evolution returns None when PY is all NaN or no topics are found — accessing results['Nodes'] on None crashes with TypeError.
-
- — missing 'Nodes' key guard: thematic_evolution can also return {"check": False} (no 'Nodes' key) when one or more periods have zero topic clusters — typically because the chosen field is empty for the data source (e.g. Keywords Plus ID is exclusive to Web of Science and is always empty for OpenAlex/PubMed). Fix: check not results.get("check", True) or "Nodes" not in results before unpacking, instead of crashing with KeyError: 'Nodes'.
-
- — empty-result HTML generation: in both fallback cases above (results is None and missing 'Nodes'), the function previously returned None for the HTML network path, which the UI rendered as a broken "Not Found" page. Fix: generate a valid but empty pyvis.Network graph (no nodes/edges) and save it as a temporary HTML file, so the Map tab renders a blank canvas instead of an error.
-
- — TM return value: the third return value (TM, consumed by the "Time Slice 1/2" tabs) was set to None in the fallback cases above, causing object of type 'NoneType' has no len() in the UI, which calls len() on it. Fix: return an empty list [] instead of None.
-
-- timeslice — NaN PY guard: if PY is entirely NaN, return {} gracefully instead of crashing in pd.cut.
-
-- timeslice — dropna before pd.cut: drop rows with NaN PY before cutting to avoid non-monotonic bin errors.
-
- timeslice — sorted breaks: wrap break points with sorted(set(breaks)) to guarantee strictly increasing, duplicate-free bin edges regardless of whether the user-provided Cutting Year falls outside the actual PY range of the data (previous cause of "bins must increase monotonically"). If fewer than 3 unique edges remain, return {} instead of calling pd.cut.
-
- timeslice — empty-period guard: even after deduplication, an out-of-range Cutting Year can produce a bin that is valid for pd.cut but contains zero rows. Downstream code (min()/max() on each period's PY values) crashed with "min() arg is an empty sequence" on such empty periods. Fix: filter out empty sub-DataFrames after splitting; if fewer than 2 non-empty periods remain, return {}.
-
-- normalize_to_minus1_1: if all values are equal, return zeros instead of dividing by zero (range = 0 produces NaN everywhere).
-
-- resk_tuple unpacking: thematic_map returns exactly 5 values; original code tried to access index 5 which is always out of range.
-
-- nclust derivation: derived directly from clusters DataFrame row count instead of always being None.
-
-- inc_matrix accumulation: moved pd.concat and downstream processing outside the loop so all periods are accumulated before building the final result.
-
-Known limitations:
--  Keywords Plus (ID) as Text Source: always empty for OpenAlex/PubMed data (exclusive to Web of Science). With the patches above, this no longer crashes — it produces an empty Map/Table/Time Slice result instead. Use TI, AB, or DE for these data sources.
-- PubMed: if PY parsing from the eSummary pubdate field fails entirely, the function returns (None, empty DataFrame, None) gracefully (now an empty network graph + empty table + empty list, per the [SESSIONE ATTUALE] patches above).
-- OpenAlex: DE keywords are sparse; thematic evolution output may be minimal depending on the year range chosen.
-
-
+- Keywords Plus (`ID`) as Text Source: always empty for OpenAlex/PubMed data (exclusive to Web of Science). With the patches above, this no longer crashes — it produces an empty Map/Table/Time Slice result instead. Use `TI`, `AB`, or `DE` for these data sources.
+- PubMed: if `PY` parsing from the eSummary `pubdate` field fails entirely, the function returns gracefully (an empty network graph + empty table + empty list, per the patches above).
+- OpenAlex: `DE` keywords are sparse; thematic evolution output may be minimal depending on the year range chosen.
+- 
 ### get_thematicmap.py
 **Status:** PASS (both sources)
 **Patches applied:**
@@ -431,6 +419,8 @@ Known limitations:
 3. `table_tag` — list filter before iterating: for non-DE/ID fields, added `isinstance(sublist, list)` check before iterating to avoid `TypeError` when sublist is a string or NaN.
 4. `table_tag` — `remove_terms` applied to all tags: original code only applied `remove_terms` for some tags. Fix: apply `remove_terms` filter to the final `word_counts` dict regardless of tag.
 5. `get_treemap` — safety check on empty `word_counts`: if `table_tag` returns an empty dict (e.g. PubMed DE is always empty), `word_counts` DataFrame is empty and `px.treemap` crashes. Fix: return empty `FigureWidget` and empty table gracefully.
+6. table_tag — missing-column guard for non-WoS-proprietary fields (e.g. WC): same fix as in get_wordcloud.py — if tag not in M.columns: return Counter() before direct column access. Fixes Error in analysis: 'WC' on Subject Categories.
+7. table_tag — literal "nan" string filtering for AB/TI fields: missing abstracts/titles sometimes arrive as the literal string "nan" rather than a true NaN (e.g. after a CSV/JSON round-trip). term_extraction() was tokenizing that string as a real word, producing a fake "nan" term that displaced or masked genuine terms (observed as a single "nan" block at 100% in the TreeMap on Abstracts). Fix: drop rows where the field is NaN or the literal string "nan" (case-insensitive) before calling term_extraction(), plus a second-layer filter stripping any stray "nan" tokens from already-extracted term lists.
 
 ### get_trendtopics.py
 **Status:** PASS (both sources)
@@ -442,6 +432,8 @@ Known limitations:
 5. `field_by_year` — PY numeric conversion: PY is stored as string in ETL output — convert to numeric with `pd.to_numeric(..., errors='coerce')` before passing to `np.quantile` to avoid `TypeError: unsupported operand type(s) for -: 'str' and 'str'`.
 6. `field_by_year` — `safe_quantile` empty array guard: if `np.repeat` produces an empty array (zero-frequency term), return `[nan, nan, nan]` gracefully instead of crashing in `np.quantile`.
 7. `field_by_year` — `timespan` type guard: `timespan` may be passed as an integer (`time_window`) rather than a `[start, end]` list — `len()` on an int crashes with `TypeError`. Fix: check `isinstance(timespan, (list, tuple))` before calling `len()`, fall back to data range if not a valid list.
+8. get_trend_topics — literal "nan" string filtering before term extraction: same root cause as above — for AB/TI fields, missing values stored as the literal string "nan" were being tokenized as a real term, producing a single fake "NAN" point on the plot that displaced genuine terms. Fix: drop rows where field_tt is NaN or the literal string "nan" (case-insensitive) before calling term_extraction(); return an empty result gracefully if no rows remain.
+9. field_by_year — second-layer "nan" token stripping: even after the upstream row-level filter, a stray "nan" token could in principle survive inside an extracted term list alongside valid terms. Added a filter (dropna + list-comprehension check) to strip any such literal "nan" tokens before building the co-occurrence matrix with cocMatrix()
 
 ### get_wordcloud.py
 **Status:** PASS (both sources)
@@ -451,6 +443,7 @@ Known limitations:
 3. `table_tag` — list filter before iterating: for non-DE/ID fields, added `isinstance(sublist, list)` check before iterating to avoid `TypeError` when sublist is a string or NaN.
 4. `table_tag` — `remove_terms` applied to all tags: original code only applied `remove_terms` for some tags. Fix: apply `remove_terms` filter to the final `word_counts` dict regardless of tag.
 5. `get_wordcloud` — empty word list guard: if `sorted_words` is empty (e.g. PubMed DE is always empty), write a minimal HTML file and return gracefully instead of crashing downstream.
+6. table_tag — missing-column guard for non-WoS-proprietary fields (e.g. WC - Subject Categories): added if tag not in M.columns: return Counter() before text_data = M[tag]. Reason: WC is never created in the standardized schema for OpenAlex/PubMed (no WoS equivalent), so direct column access raised a raw KeyError: 'WC' instead of degrading gracefully like the ID/DE paths.
 
 ### get_wordfrequency.py
 **Status:** PASS (both sources)
@@ -463,6 +456,11 @@ Known limitations:
 6. `keyword_growth` — PATCH 3: empty data guard: if data is empty after filtering, `data['Year'].min()` returns NaN and `range(NaN, NaN)` crashes with `TypeError`. Fix: return empty DataFrame with just a Year column.
 7. `keyword_growth` — PATCH 4: safe split with type check: iterating over elements without type checking crashes with `TypeError` on non-string/non-list elements. Fix: `safe_split` returns empty list for unexpected types.
 8. `trim_years` — PATCH 5: empty year range guard: if `year_range` is empty, return empty Series immediately instead of producing inconsistent results.
+9. get_word_frequency — missing-column guard before term_extraction: added if field_wf not in df_plain.columns: return go.FigureWidget(go.Figure()), pd.DataFrame(). Reason: unlike the other three files, this function calls term_extraction() unconditionally for any field_wf with no existence check, and only caught ValueError — a missing column (e.g. WC, if ever exposed in this widget) would have raised an unhandled KeyError.
+10. get_word_frequency — broadened exception handling: extended the existing try/except ValueError around term_extraction() to also catch KeyError, as a defensive fallback alongside the explicit check above.
+11. get_word_frequency — literal "nan" string filtering for AB/TI fields: same fix pattern as in get_treemap.py/get_frequentwords.py/get_trendtopics.py — drop rows where the field is NaN or the literal string "nan" before calling term_extraction().
+12. keyword_growth — literal "nan" token stripping: added a filter (data['Term'].astype(str).str.strip().str.lower() != 'nan') to remove stray "nan" tokens from the expanded term list, covering both free-text (AB/TI) and delimiter-separated (e.g. DE/ID) fields that route through this function.
+13. get_word_frequency — empty/degenerate keyword_growth result guard: added a check (word_freq.empty or list(word_freq.columns) == ['Year']) before attempting column slicing and plotting, to avoid building a chart from a result with no actual term columns.
 
 
 ### get_worldmapcollaboration.py
