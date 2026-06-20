@@ -36,9 +36,16 @@ def SR(M):
             first = parts[1].strip()
             initial = first[0] if first else ""
             return f"{surname} {initial}".strip()
-        # Handle "Firstname Surname" format (OpenAlex style)
+        # Handle "Firstname Surname" format (OpenAlex style) vs.
+        # "Surname Initials" format (PubMed style, e.g. "Scharf C", "de Mattos BP")
         parts = name.split()
         if len(parts) >= 2:
+            # PubMed style: last token is short, all-uppercase initials
+            if parts[-1].isupper() and len(parts[-1]) <= 3 and not parts[0].isupper():
+                surname = " ".join(parts[:-1])
+                initial = parts[-1][0]
+                return f"{surname} {initial}"
+            # OpenAlex/WoS style: "Firstname [Middle] Surname"
             surname = parts[-1]
             initial = parts[0][0]
             return f"{surname} {initial}"

@@ -1,5 +1,6 @@
 from .utils import *
 from .parsers import *
+from .io_utils import load_standardized_csv
 import zipfile
 import tempfile
 import os
@@ -1603,12 +1604,20 @@ def biblio_json(data, source, type, author):
     # PATCH: support standardized CSV files produced by the ETL pipeline.
     # These CSVs already contain WoS-like columns such as TI, AU, PY, SO, SR.
     # Therefore they must not be re-parsed with the old WoS/Scopus/PubMed formatters.
+    #
+    # Multi-value columns (AU, AF, C1, AU_CO, DE, ID, CR) are stored in these
+    # CSVs joined by ";" per spec Section 4.2 ("Delimiter Standard"). We must
+    # use load_standardized_csv() to split them back into real lists before
+    # converting to JSON — otherwise they would be serialized as plain
+    # ";"-joined strings, and every downstream author/keyword/citation count
+    # would silently come out as 0.
     if type.endswith("csv"):
-        df_csv = pd.read_csv(data, keep_default_na=False)
+        df_csv = pd.read_csv(data, keep_default_na=False, nrows=0)
 
         required_standard_cols = {"TI", "AU", "PY", "SO", "SR", "DB"}
 
         if required_standard_cols.issubset(set(df_csv.columns)):
+            df_csv = load_standardized_csv(data)
             entries = df_csv.to_dict(orient="records")
             return json.dumps(entries, ensure_ascii=False, indent=4)
 
