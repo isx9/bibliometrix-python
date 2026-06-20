@@ -20,7 +20,7 @@ All of the above return empty results when Keywords Plus is selected as the fiel
 
 ## Subject Categories (`WC`) — no OpenAlex equivalent exists
 
-Unlike `ID`, which is explicitly created and filled with an empty value, `WC` is never added to the standardized schema for OpenAlex at all, since WoS-style subject category classification has no corresponding field in either source API. Selecting Subject Categories in Most Frequent Words / WordCloud / TreeMap surfaces a raw error rather than a graceful empty result, because the absent column is accessed directly rather than checked for first.
+Unlike `ID`, which is explicitly created and filled with an empty value, `WC` is never added to the standardized schema for OpenAlex at all, since WoS-style subject category classification has no corresponding field in either source API. Selecting Subject Categories in Most Frequent Words / WordCloud / TreeMap now returns an empty result rather than crashing: `table_tag()` checks `if tag not in M.columns` before accessing the column, so the missing field degrades the same way `ID` does above (see "Keywords Plus" — no underlying text to analyze, so the panel is empty by design, not by failure).
 
 ## Author Institutions (`AU_UN`) — affiliation string format incompatible with WoS-style parsing
 
