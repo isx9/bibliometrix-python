@@ -1,0 +1,483 @@
+# Patching Documentation
+
+> **Update note (post-verification):** every mention below of *"OpenAlex: CR contains URLs"* described the state of the ETL **before** `resolve_openalex_references()` was added to `standardizer.py`. Direct inspection of `test_openalex_200.csv` (the 200-row OpenAlex test set) shows `CR` fully resolved into `"Author, Year, Journal"`-style strings for 200/200 rows, with zero raw `openalex.org` URLs remaining. The eight entries below that referenced the old behavior have been corrected accordingly; the corrected line is marked **[UPDATED]**.
+
+## Services
+
+### `www/services/biblionetwork.py`
+**Status:** PASS (all fields, both sources)
+**Patches applied:**
+- None check on input M: if M is None, prints a message and returns None gracefully instead of crashing downstream.
+- None checks on cocMatrix return values: each branch checks if WA, WCR, WSO, WCO etc. are None before attempting matrix multiplication — returns None gracefully if any required matrix is missing.
+- M.get() → isinstance check in final cleanup: after computing NetMatrix, unwrap M with isinstance check before accessing M.columns. Reason: M may already be a plain DataFrame after term_extraction.
+- db_name default changed from hardcoded "web_of_science" to "": unknown sources no longer silently get treated as WoS.
+- db_name normalization to lowercase: `str(M["DB"].iloc[0]).lower()` ensures consistent comparison regardless of DB value casing.
+- Scopus reference filter now checks `db_name == "scopus"` (lowercase) to match the normalized db_name.
+- label_short — added "openalex" and "pubmed" to the WoS branch: both sources produce SR strings in the same "Author, Year, Journal" format, so they are routed to the same label shortening logic.
+- label_short — unknown sources: labels returned unchanged instead of crashing.
+
+### `cocmatrix.py`
+**Status:** PASS (all fields, both sources)
+**Patches applied:**
+- df.get() → isinstance check at the top: unwrap Shiny reactive or use plain DataFrame directly. Reason: pandas .get() requires a column name as argument, crashes without one. Fix: `df.get() if hasattr(df, 'get') and callable(df.get) and not isinstance(df, pd.DataFrame) else df`.
+- None/empty check on input: if M is None or empty, prints a message and returns None gracefully.
+- SR column fallback: if LABEL is not in columns, falls back to SR as the index — prints a message and returns None if SR is also missing.
+- Field existence check: if the requested field is not a column in M, prints a message and returns None instead of crashing with KeyError.
+- CR field safety: `DOI;` → `DOI` replacement applied only when CR contains lists, avoiding TypeError on non-list entries.
+- Empty matrix guard: if uniqueField is empty after filtering, prints "Matrix is empty!!" and returns None gracefully instead of creating a zero-column matrix.
+- reduceRefs type check: skips non-string entries in refs list with `isinstance(ref, str)` check to avoid AttributeError on None or numeric values.
+
+### `couplingmap.py`
+**Status:** PASS (both sources)
+**Patches applied:**
+- couplingMap — df.get() → isinstance check: after metaTagExtraction, unwrap result with isinstance check to get plain DataFrame M.
+- couplingMap — network() None guard: network() returns None when the matrix is empty (e.g. empty CR for PubMed, or any source with too few citation links for the chosen field). Return None gracefully instead of crashing on `Net['graph']`. **[UPDATED]**
+- couplingMap — normalizeCitationScore() None guard: normalizeCitationScore may return None if localCitations fails. Return None gracefully.
+- couplingMap — empty cluster filter guard: if df is empty after the frequency filter (`df['freq'] >= minfreq`), return None gracefully instead of crashing on downstream computations.
+- normalizeCitationScore — localCitations None guard: localCitations may return None if histNetwork finds no citations. Return None gracefully.
+- normalizeCitationScore — isinstance check for reactive unwrapping in global impact branch.
+- localCitations — df.get() → isinstance check after metaTagExtraction.
+- localCitations — None/empty check on M after unwrapping.
+- localCitations — histNetwork None guard: histNetwork may return None when no local citations are found. Return None gracefully.
+- localCitations — zero LCS guard: if all LCS values are 0, return None to avoid propagating empty results downstream.
+- network — isinstance check for df_plain before passing to term_extraction or biblionetwork.
+- network — None guard on NetMatrix: if NetMatrix is None or matrix is empty, print message and return None gracefully.
+- labeling — removed reactive.Value wrapper: df is already a plain DataFrame when passed to term_extraction inside labeling.
+
+### `format_functions.py`
+**Status:** PASS (import check only)
+**Patches applied:**
+- PATCH 1 — columns NameError guard in process_single_file: `columns` was referenced without being defined in local scope, causing NameError. Fix: use `globals().get('columns', [])` to safely fall back to an empty list if columns is not defined.
+- PATCH 2 — entry.get() TypeError guard in process_single_file: entries from bibtexparser may not support .get() with a default — wrapped in try/except to avoid silent KeyError or AttributeError crashes.
+- PATCH 3 — author name unpacking guard in format_au_column for Scopus BibTeX: original code used `surname, names = person.split(", ")` without checking the number of parts — if the string contains no comma+space the unpacking crashes with ValueError. Fix: guard with `len(parts) == 2` check before unpacking.
+- biblio_json — ETL CSV passthrough: added support for standardized CSV files produced by the ETL pipeline. If the CSV contains the standard WoS-like columns (TI, AU, PY, SO, SR, DB), it is passed through directly as JSON without re-parsing through the old source-specific formatters.
+
+### `histnetwork.py`
+**Status:** PASS (both sources)
+**Patches applied:**
+- histNetwork — df.get() → isinstance check: original code called df.get() without arguments, crashing on a plain pandas DataFrame. Fix: `if isinstance(df, pd.DataFrame): M = df.copy() else: M = df.get().copy()`.
+- histNetwork — None/empty check on M after unwrapping: if M is None or empty, return None gracefully.
+- histNetwork — DB column missing guard: if DB column is absent, return None gracefully instead of crashing on `M['DB'].iloc[0]`.
+- histNetwork — DI missing guard: if DI column is absent, fill with empty strings before processing.
+- histNetwork — CR missing guard: if CR column is absent, print message and return None gracefully.
+- histNetwork — CR list normalization: ensure CR entries are always lists before processing, handling string and NaN cases.
+- histNetwork — TC and PY numeric conversion: `pd.to_numeric(..., errors='coerce')` applied to both to avoid arithmetic errors on string values.
+- histNetwork — DB routing extended: added "OPENALEX" and "PUBMED" to the `wos()` branch. Both sources produce SR and DI fields in the format `wos()` expects, and OpenAlex's CR is resolved into the same "Author, Year, Journal" format via `resolve_openalex_references()` upstream in `standardizer.py` (verified 200/200 clean on the OpenAlex test set), so the same matching logic applies cleanly to both sources without a crash or an accuracy penalty. **[UPDATED]**
+- wos — required columns check: if PY or CR are missing, print message and return None gracefully.
+- wos — empty CR_df early return: if no valid references were parsed (e.g. empty CR for PubMed, or a record whose references failed to resolve), return early with LCS=0 for all documents and NetMatrix=None instead of hanging. **[UPDATED]**
+- wos — SR_FULL missing guard: if SR_FULL column is absent, fill with empty strings before building LABEL.
+- wos — optional columns guard: if TI, DE, or ID are missing, fill with empty strings before building histData.
+- wos — reactive.Value(M) removed before cocMatrix call: reactive.Value is a Shiny-specific object that crashes outside a running Shiny application. Fix: pass M directly since cocMatrix already handles plain DataFrames.
+- scopus — required columns check: if CR or SR are missing, print message and return None gracefully.
+- scopus — optional columns guard: if AU, BP, EP, SR_FULL, TI, DE, ID, or DI are missing, fill with safe defaults before processing.
+
+### `metatagextraction.py`
+**Status:** PASS after patching (all fields, both sources)
+**Patches applied:**
+- metaTagExtraction — isinstance check replacing `hasattr(df, "get")`: original code used `hasattr(df, "get")` to detect Shiny reactive objects, but pandas DataFrames also have `.get()`, so the check always resolved to True and called `df.get()` without arguments — crashing because pandas `.get()` requires a column name. Fix: `if isinstance(df, pd.DataFrame): M = df.copy() else: M = df.get().copy()`.
+- SR — infinite loop fix: original while loop caused an infinite loop in pandas >= 2.0 when deduplicating SR values. Fix: replaced with a dict-based seen-counter that iterates over the index once, appending -b, -c, etc. for duplicates.
+- SR — NaN guard before deduplication loop: added `.fillna("").astype(str).reset_index(drop=True)` before the seen-counter loop to prevent NaN values from being stored as keys and producing malformed SR strings.
+- SR — JI empty string fallback: `M.loc[no_art, "JI"] = M.loc[no_art, "SO"]` fills rows where JI is "" with SO, preventing ", , " gaps in the SR string when JI is missing.
+- SR — DB case normalization in author formatting: `M["DB"].iloc[0].lower() == "scopus"` normalizes the DB value to lowercase before comparison, making the author name reformatting robust to mixed-case DB values like "Scopus" or "SCOPUS".
+- CR_SO — None replaced with "" for empty rows: original returned None for articles with no parsed cited sources (`lambda l: ";".join(l) if l else None`). None in a string column crashes downstream `.str.*` operations. Fix: `lambda l: ";".join(l) if l else ""`.
+- AU_CO / AU1_CO — fillna float NaN guard: `M["C1"].fillna(M["RP"])` can produce numpy.float64 NaN when both C1 and RP are missing, making the cell non-iterable and crashing the country extraction loop. Fix: added `.infer_objects(copy=False)` and a follow-up `.apply(lambda x: x if isinstance(x, list) else ([] if pd.isna(x) else [x]))` to guarantee every cell is a list before iteration.
+- AU_CO / AU1_CO — empty list fallback when both C1 and RP are missing: the explicit for loop after fillna sets `C1.at[i] = []` when the cell is still an empty list and RP is also NaN, preventing downstream iteration over None or float.
+- AU_CO / AU1_CO — country name normalization before regex search: "RUSSIAN FEDERATION" is not present in countries.txt (listed as "RUSSIA"), so matches silently failed. Fix: applied `.replace("RUSSIAN FEDERATION", "RUSSIA")` and equivalent aliases (UNITED STATES → USA, ENGLAND / SCOTLAND / WALES / NORTH IRELAND → UNITED KINGDOM) to the input string before the regex search, not only to the output list.
+- AU1_CO — None replaced with "" for country not found: original returned None when no country matched. Fix: `if pd.notna(country) else ""`. Note: downstream consumers checking `if country is None` must be updated to `if not country` to catch the empty string.
+- AU_UN — `M.loc[condition, "AU_UN"]` replacing `M["AU_UN"].loc[...]`: original assignment syntax triggered SettingWithCopyWarning and could silently fail to modify the underlying DataFrame in some pandas versions. Fix: `M.loc[M["C3"].notna() & (M["C3"] != ""), "AU_UN"] = M["C3"]`.
+- AU_UN — None replaced with "" in replace dict: original used `replace({"NOTDECLARED": None, "NOTREPORTED": None})`, which inserts None into a string column and crashes subsequent `.str.*` calls. Fix: `replace({"NOTDECLARED": "", "NOTREPORTED": ""})`.
+
+### `networkplot.py`
+**Status:** PASS (all sources)
+**Patches applied:**
+- network_plot — empty graph guard on entry: after building bsk_network from NetMatrix, if the graph has no vertices or deg is empty, return None immediately instead of crashing on subsequent operations.
+- network_plot — deg recomputed after degree-based filtering: after `delete_vertices()` in the degree branch, deg and `bsk_network.vs["deg"]` were stale. Fix: recompute both immediately after deletion.
+- network_plot — deg recomputed after n-based filtering: same stale-deg issue in the n branch. Fix: recompute both immediately after deletion.
+- network_plot — empty graph guard after filtering: after either filtering branch, check `len(bsk_network.vs) == 0` and return None gracefully before attempting simplification or clustering.
+- network_plot — deg recomputed after isolate removal: after `delete_vertices(isolates)`, deg and `bsk_network.vs["deg"]` were stale. Fix: recompute both immediately after deletion.
+- network_plot — empty graph guard after isolate removal: after removing isolates, check `len(bsk_network.vs) == 0` and return None gracefully before attempting clustering.
+- network_plot — safe deg attribute access in label filtering: `bsk_network.vs["deg"]` raises a KeyError if the attribute was never set (e.g. after external filtering). Fix: `deg_vals = bsk_network.vs["deg"] if "deg" in bsk_network.vs.attributes() else bsk_network.degree()`.
+- clustering_network — try/except around all clustering calls: several igraph community detection algorithms (spinglass, leading_eigenvector, infomap) raise exceptions on small, disconnected, or unweighted graphs. Fix: wrapped the entire if/elif chain in `try/except Exception`, falling back to a single-cluster assignment (`membership = [0] * n`) so the rest of the pipeline can continue.
+- switch_layout — division-by-zero guard in coordinate normalization: when all nodes share the same layout coordinate on an axis (e.g. a single-node graph or perfectly collinear layout), range_coords is zero and normalization produces NaN. Fix: `range_coords[range_coords == 0] = 1` before dividing.
+
+### `tabletag.py`
+**Status:** PASS (both sources). No patches required.
+
+### `termextraction.py`
+**Status:** PASS (both sources)
+**Patches applied:**
+- term_extraction — reactive vs DataFrame detection fixed: original used `hasattr(df, 'get')` to detect Shiny reactive objects, but pandas DataFrames also have a `.get()` method, causing `df.get()` to be called without arguments on plain DataFrames and crashing. Fix: `is_reactive = hasattr(df, 'get') and callable(df.get) and not isinstance(df, pd.DataFrame)`, then `M = df.get() if is_reactive else df.copy()`.
+- term_extraction — reactive return path: original always called `df.set(M)` and returned df regardless of whether df was reactive. For plain DataFrames `df.set()` does not exist and crashes. Fix: `if is_reactive: df.set(M); return df else: return M` — only the reactive path calls `.set()`.
+
+### `thematicmap.py`
+**Status:** PASS (both sources)
+**Patches applied:**
+- thematic_map — reactive vs DataFrame detection fixed: original used `hasattr(df, 'get')` which is True for plain pandas DataFrames too. Fix: `not isinstance(df, pd.DataFrame)` guard added so `df.get()` is only called on actual Shiny reactive objects; plain DataFrames are copied directly.
+- thematic_map — M_plain extracted for term_extraction calls: term_extraction expects a plain DataFrame, not a reactive wrapper. Fix: M_plain is unwrapped from the reactive object before being passed to term_extraction in the TI and AB branches.
+- thematic_map — TI branch: term_extraction run on M_plain, then result wrapped back in reactive.Value before passing to biblionetwork, and `m["TI_TM"]` updated so cluster_assignment can access it downstream.
+- thematic_map — AB branch: same pattern as TI — term_extraction run on M_plain, result wrapped in reactive.Value for biblionetwork, and `m["AB_TM"]` updated for cluster_assignment.
+- thematic_map — NetMatrix empty/None guard: biblionetwork can return None or an empty DataFrame when the keyword column is absent or has no co-occurrences (e.g. PubMed DE is always empty from the eSummary API). Fix: `if NetMatrix is not None and not NetMatrix.empty` check before calling network_plot, returning a graceful `None, None, pd.DataFrame(), pd.DataFrame(), pd.DataFrame()` tuple otherwise.
+- thematic_map — Net None guard: network_plot can return None on small or empty graphs. Fix: explicit `if Net is None` check after the network_plot call, returning the same safe empty tuple.
+- thematic_map — node_colors None guard: `net.vs['color']` can contain None entries if clustering produced uncolored nodes. Fix: `node_colors = ["#D3D3D3" if c is None else c for c in node_colors]` applied immediately after extraction.
+- thematic_map — DI missing guard in cluster_assignment: if DI is absent from the DataFrame, the column selection `['DI', 'AU', 'TI', 'SO', 'PY', 'TC', 'TCpY', 'NTC', 'SR']` crashes with a KeyError. Fix: `if 'DI' not in M.columns: M['DI'] = np.nan` before the assign block.
+- thematic_map — TC non-numeric guard in cluster_assignment: `M['TC'] / (year - M['PY'])` crashes if TC contains strings or NaN. Fix: `pd.to_numeric(M['TC'], errors='coerce').fillna(0)` applied before the arithmetic.
+- thematic_map — PY non-numeric guard in cluster_assignment: same arithmetic crashes if PY is stored as a string. Fix: `pd.to_numeric(M['PY'], errors='coerce')` applied before TCpY calculation.
+- cluster_assignment — field column missing guard: if the requested field (or its derived _TM variant) is absent from M, the function crashes immediately on `M[field]`. Fix: `if field not in M.columns: return pd.DataFrame()` early return.
+- cluster_assignment — filtered_df empty guard raised as ValueError: after filtering sEij_df by `df_lab['words']`, if no rows survive (e.g. all keywords were too infrequent or filtered out), the subsequent `.groupby().agg()` produces a silent empty result or crashes. Fix: explicit `if filtered_df.empty: raise ValueError(...)` with a descriptive message before the aggregation block.
+
+## Functions
+
+### `get_affiliationproductionovertime.py`
+**Status:** PASS (both sources)
+**Patches:**
+- metaTagExtraction called before use to derive AU_UN column
+- Reactive/DataFrame check — correctly uses `not isinstance(df, pd.DataFrame)`
+- Safety check: AU_UN missing after extraction → returns empty figure
+- Safety check: AFFY empty after filtering → returns empty figure
+- Safety check: AffOverTime empty → returns empty figure
+
+### `get_annualproduction.py`
+**Status:** PASS (both sources)
+**Patches applied:**
+- Reactive/DataFrame check — correctly uses `not isinstance(df, pd.DataFrame)`
+- PY column forced to int safely with `pd.to_numeric(errors="coerce").fillna(0)`
+
+### `get_authorlocalimpact.py`
+**Status:** PASS (both sources)
+**Patches applied:**
+- Line 16: `df = df.get()` → fixed with isinstance check. Reason: pandas `.get()` requires a column name, crashes without one. Fix: `isinstance(df, pd.DataFrame)` check.
+
+### `get_authorproductionovertime.py`
+**Status:** PASS (both sources)
+**Patches applied:**
+- Line 19: `data = df.get()` → fixed with isinstance check.
+
+### `get_averagecitations.py`
+**Status:** PASS (both sources)
+**Patches applied:**
+- Line 14: `data = df.get()` → fixed with isinstance check.
+- Line 32: `current_year - table["PY"]` → TypeError. Reason: PY is stored as string in the standardized DataFrame but the function requires arithmetic subtraction which needs integers. Fix: added `pd.to_numeric(table["PY"], errors="coerce")` before the calculation.
+
+### `get_bradfordlaw.py`
+**Status:** PASS (both sources)
+**Patches applied:**
+- Line 15: `data = df.get()` → fixed with isinstance check.
+
+### `get_citedcountries.py`
+**Status:** PASS (both sources)
+**Patches applied:**
+- Reactive/DataFrame check — correctly uses `not isinstance(df, pd.DataFrame)`
+- Filter for empty AU1_CO strings added — dropna alone does not catch empty strings
+- Line 110: safety check added before `int(max_x // 10)`. Reason: PubMed has no affiliation data, x_values is empty, `x_values.max()` returns NaN, `int(NaN)` crashes. Fix: return empty figure if x_values is empty or max_x is NaN.
+**Known limitations:**
+- PubMed returns empty results — eSummary API provides no affiliation data
+
+### `get_clusteringcoupling.py`
+**Status:** PASS (both sources)
+**Patches applied:**
+- Safety check: couplingMap returns None when network is empty → returns empty figures instead of crashing
+**Known limitations:**
+- PubMed: CR empty from eSummary API, coupling map cannot be built
+- **[UPDATED]** OpenAlex: CR is resolved into WoS-style "Author, Year, Journal" citation strings via `resolve_openalex_references()` (verified 200/200 clean on the test set) — this limitation no longer applies to OpenAlex.
+
+### `get_co_occurence_network.py`
+**Status:** PASS (both sources)
+**Patches applied:**
+- field_by_year() line 425: PY converted to numeric before percentile calculation. Reason: PY stored as string, `np.percentile` requires numeric values. Fix: `pd.to_numeric(M['PY'], errors='coerce').values`
+**Warnings (non-blocking):**
+- Line 437: `n[col_idx]` uses deprecated integer indexing on Series. Will break in future pandas versions. Fix: change to `n.iloc[col_idx]`
+
+### `get_cocitation.py`
+**Status:** PASS (both sources)
+**Known limitations:**
+- PubMed: co-citation matrix empty — CR not returned by eSummary API
+- **[UPDATED]** OpenAlex: CR is resolved into WoS-style citation strings via `resolve_openalex_references()`, verified clean on the 200-row test set — co-citation results are no longer limited by raw URLs for this source.
+
+### `get_collaborationnetwork.py`
+**Status:** PASS (both sources)
+**Patches applied:**
+- Reactive/DataFrame check — correctly uses `not isinstance(df, pd.DataFrame)` before calling `.get()`
+- Safety check: network_plot returns None when graph is empty → returns empty figures instead of crashing
+**Notes:**
+- Field argument accepts "COL_AU", "COL_UN", "COL_CO"
+- Tested with COL_AU (author collaboration network)
+- COL_UN and COL_CO depend on AU_UN and AU_CO — both guarded with `if "<col>" not in m.columns` before calling metaTagExtraction, so ETL-native values (e.g. `parse_openalex_countries()`'s `AU_CO` for OpenAlex) are preserved when already present.
+
+### `get_correspondingauthorcountries.py`
+**Status:** PASS (both sources)
+**Patches applied:**
+- Reactive/DataFrame check — correctly uses `not isinstance(df, pd.DataFrame)` before calling `.get()`
+- Filter for empty AU1_CO strings — dropna alone does not catch empty strings
+- Safety check after filtering — if all countries were blank, returns empty figure instead of crashing
+**Known limitations:**
+- Results will be empty for PubMed and limited for OpenAlex because affiliation data (C1) is often missing, so AU1_CO cannot be derived
+
+### `get_countriesproduction.py`
+**Status:** PASS (both sources)
+**Patches applied:**
+- Reactive/DataFrame check — correctly uses `not isinstance(df, pd.DataFrame)` before calling `.get()`
+- Filter for empty AU_CO strings after explode — prevents empty country strings from being counted
+**Known limitations:**
+- Results will be limited for OpenAlex and empty for PubMed because affiliation data (C1) is often missing, so AU_CO cannot be derived
+
+### `get_countriesproductionovertime.py`
+**Status:** PASS (both sources)
+**Patches applied:**
+- Reactive/DataFrame check — correctly uses `not isinstance(df, pd.DataFrame)` before calling `.get()`
+- Safety check: AFFY empty after filtering → returns empty figure
+- Safety check: AffOverTime empty → returns empty figure
+**Known limitations:**
+- Results will be limited for OpenAlex and empty for PubMed because affiliation data (C1) is often missing, so AU_CO cannot be derived
+
+### `get_factorialanalysis.py`
+**Status:** PASS (both sources)
+**Patches applied:**
+- Line 82: Reactive/DataFrame check — correctly uses `not isinstance(df, pd.DataFrame)` before calling `.get()`
+- Line 91: df_plain passed to conceptual_structure instead of original df — ensures plain DataFrame is used, not the reactive wrapper
+- (line 244): safety check if all Dim2 values are equal — range is 0 and label_offset would cause division by zero
+- (line 614): safety check if `results.get()` returns None — neither 'df' nor 'res' key exists in results
+- (line 593): safety check if all terms filtered out by min_degree — CW would be empty DataFrame
+- (line 637): safety check if n_clusters greater than number of available terms
+- (line 818): safety check if all points equidistant from centroid
+- Line 549: `CW.loc` crashes when CW is None. Reason: cocMatrix returns None when ID field is empty (Keywords Plus always empty for OpenAlex and PubMed). Fix: added None check before `CW.loc` call, returns empty result instead of crashing.
+**Known limitations:**
+- ID (Keywords Plus) always empty for OpenAlex and PubMed so conceptual_structure produces empty results for both sources
+
+### `get_filters.py`
+**Status:** PASS (both sources)
+**Patches applied:**
+- PY column forced to numeric safely with `pd.to_numeric(errors="coerce").fillna(0).astype(int)`
+- TC column forced to numeric safely with same pattern
+- Line 15: `data = df.get()` → fixed with isinstance check. Reason: pandas `.get()` requires a column name as argument, crashes without one. Fix: `isinstance(df, pd.DataFrame)` check: if it's a DataFrame → copy it directly; if it's a Shiny reactive object → use `.get()` to unwrap it.
+**Notes:**
+- `get_filtered_table()` in the same file is not testable, it requires Shiny input objects (`input.year_slider()`, `input.languages()`, etc.) only available inside the dashboard
+
+### `get_frequentwords.py`
+**Status:** PASS (all word types, both sources)
+**Patches applied:**
+- Reactive/DataFrame check — correctly uses `not isinstance(df, pd.DataFrame)` before calling `.get()`
+- Same reactive/DataFrame check for df_plain passed to term_extraction
+- `safe_parse()` replaces `eval()` for DE/ID columns — handles malformed strings without crash
+- filter with `isinstance(sublist, list)` before iterating — avoids TypeError on None or str in TI/AB path
+- remove_terms applied to all tags, not just DE/ID — fixes silent bug where stopword removal was skipped for TI/AB
+- wrapped `term_extraction()` call in try/except ValueError — returns `{}` when vocabulary is empty
+- table_tag — missing-column guard for non-WoS-proprietary fields (e.g. WC): same fix as above — `if tag not in M.columns: return {}` before direct column access. Fixes `Error in analysis: 'WC'`.
+- table_tag — literal "nan" string filtering for AB/TI fields: same root cause and fix as in `get_treemap.py` — drop rows where the field is NaN or the literal string "nan" before `term_extraction()`, plus stray-token stripping in the extracted list. Fixes a leftover "nan" bubble (200 occurrences, 100%) shown on Abstracts.
+- get_frequent_words — empty-result safety guard before plotting: this file was missing the `if word_counts.empty: return ...` check already present in `get_wordcloud.py` and `get_treemap.py`. Without it, an empty/degenerate result could leave a stale plot bubble visible in the UI instead of rendering cleanly empty. Fix: added the same guard, returning an empty FigureWidget and table when no words are found.
+**Known limitations:**
+- AB/PubMed returns empty results — PubMed eSummary API does not return abstracts, so the vocabulary is empty. Not an ETL bug.
+
+### `get_historiograph.py`
+**Status:** PASS (both sources)
+**Patches applied:**
+- Replaced two `raise ValueError` blocks after `histNetwork()` returns None with a graceful return: empty DataFrame and temp HTML file path instead of crashing, consistent with the pattern used in `get_clusteringcoupling.py` and `get_citedcountries.py`. Removed redundant first `if hist_results is None` check — the second condition already covers it.
+- `node_label="ID"` branch: replaced unsafe `eval()` on Author_Keywords with a safe parser that handles list, semicolon-separated, and comma-separated formats without crashing on non-Python strings.
+- `node_label="DE"` branch: same safe parser applied to KeywordsPlus field for the same reason.
+**Known limitations:**
+- PubMed: CR is empty from eSummary API, so histNetwork has nothing to build a citation graph from.
+- **[UPDATED]** OpenAlex: CR is resolved into WoS-style "Author, Year, Journal" citation strings via `resolve_openalex_references()` before reaching this function — verified 200/200 clean on the test set — so historiograph output is supported for OpenAlex. Actual output quality still depends on how many of those references match other documents within the sample.
+
+### `get_localcitedauthors.py`
+**Status:** PASS (both sources)
+**Patches applied:**
+- Reactive/DataFrame check — correctly uses `not isinstance(df, pd.DataFrame)` before calling `.get()` to unwrap Shiny reactive objects
+- Early return if all LCS values are 0 — avoids hanging on PubMed data, where CR is empty and histNetwork cannot build a citation graph. **[UPDATED]**
+**Known limitations:**
+- PubMed: CR is empty from eSummary API, LCS is always 0, function returns empty result.
+- **[UPDATED]** OpenAlex: CR is resolved into WoS-style citation strings via `resolve_openalex_references()`, verified 200/200 clean on the test set — local cited authors output is supported for OpenAlex.
+
+### `get_localciteddocuments.py`
+**Status:** PASS (both sources)
+**Patches applied:**
+- Line 16: `M = df.get()` → fixed with isinstance check. Reason: pandas `.get()` requires a column name as argument, crashes without one. Fix: `isinstance(df, pd.DataFrame)` check: if it's a DataFrame → use it directly; if it's a Shiny reactive object → use `.get()` to unwrap it.
+**Known limitations:**
+- PubMed: CR is empty from eSummary API, LCS is always 0, function returns empty result.
+- **[UPDATED]** OpenAlex: CR is resolved into WoS-style citation strings via `resolve_openalex_references()`, verified 200/200 clean on the test set — local cited documents output is supported for OpenAlex.
+
+### `get_localcitedreferences.py`
+**Status:** PASS (both sources)
+**Patches applied:**
+- Line 19: `data = df.get()` → fixed with isinstance check. Reason: pandas `.get()` requires a column name as argument, crashes without one. Fix: `data = df if isinstance(df, pd.DataFrame) else df.get()`.
+- After filtering step: added early return when source_counts is empty. Reason: PubMed CR is always empty, causing max_x to be NaN and crashing downstream with `ValueError: cannot convert float NaN to integer` when computing x-axis ticks. Fix: return `(go.Figure(), empty_df)` gracefully.
+
+### `get_localcitedsources.py`
+**Status:** PASS (both sources)
+**Patches applied:**
+- Line 10: `data = df.get().copy()` → fixed with isinstance check. Reason: pandas `.get()` requires a column name as argument, crashes without one. Fix: `data = df.copy() if isinstance(df, pd.DataFrame) else df.get().copy()`.
+
+### `get_lotkalaw.py`
+**Status:** PASS (both sources)
+**Patches applied:**
+- Line 17: `data = df.get()` → fixed with isinstance check. Reason: pandas `.get()` requires a column name as argument, crashes without one. Fix: `data = df if isinstance(df, pd.DataFrame) else df.get()`.
+
+### `get_maininformations.py`
+**Status:** PASS (both sources)
+**Patches applied:**
+- Line 10: `data = df.get()` → fixed with isinstance check. Reason: pandas `.get()` requires a column name as argument, crashes without one. Fix: `data = df if isinstance(df, pd.DataFrame) else df.get()`.
+
+### `get_referencesspectroscopy.py`
+**Status:** PASS (both sources)
+**Patches applied:**
+- Line 21: `df = df.get()` → fixed with isinstance check. Reason: pandas `.get()` requires a column name as argument, crashes without one. Fix: `df = df if isinstance(df, pd.DataFrame) else df.get()`.
+- CR list conversion: CR column entries are joined into semicolon-separated strings before processing if they are lists, as produced by the ETL pipeline.
+- Empty table guard: if no references fall within the year range, returns `(empty FigureWidget, empty DataFrame, empty DataFrame)` gracefully instead of crashing downstream.
+
+### `get_relevantaffiliations.py`
+**Status:** PASS (both sources)
+**Patches applied:**
+- `df.get()` → fixed with isinstance check. Reason: pandas `.get()` requires a column name as argument, crashes without one. Fix: `df.get() if hasattr(df, 'get') and callable(df.get) and not isinstance(df, pd.DataFrame) else df`.
+- metaTagExtraction return handling: AU_UN is a derived field that must be extracted before use, so `metaTagExtraction(df, Field="AU_UN")` is called only when `disambiguation == "yes"`.
+- Safety check after extraction: if data is None or empty, returns empty figure and empty DataFrame gracefully.
+- Missing AU_UN column guard: if AU_UN is absent after extraction in disambiguation mode, returns empty figure and empty DataFrame gracefully.
+- Missing C1 column guard: if C1 is absent in non-disambiguation mode, returns empty figure and empty DataFrame gracefully.
+- Empty affiliations guard: if affiliations is empty after explode, returns empty figure and empty DataFrame gracefully.
+
+### `get_relevantauthors.py`
+**Status:** PASS (both sources)
+**Patches applied:**
+- Line 14: `data = df.get()` → fixed with isinstance check. Reason: pandas `.get()` requires a column name as argument, crashes without one. Fix: `data = df if isinstance(df, pd.DataFrame) else df.get()`.
+- None check before `df.get()`: if df is None, returns `(None, empty DataFrame)` gracefully.
+- Empty data check after unwrapping: if data is None or empty, returns `(None, empty DataFrame)` gracefully.
+- AU column guard: if AU is missing, fills with empty lists to avoid KeyError downstream.
+- AU list format guard: ensures AU entries are always lists, handling string and NaN cases.
+- Empty authors check: if no authors are found after flattening, returns `(None, empty DataFrame)` gracefully.
+
+### `get_relevantsources.py`
+**Status:** PASS (both sources)
+**Patches applied:**
+- Line 17: `df.get()` → fixed with isinstance check. Reason: pandas `.get()` requires a column name as argument, crashes without one. Fix: `data = df if isinstance(df, pd.DataFrame) else df.get()`.
+
+### `get_sourceslocalimpact.py`
+**Status:** PASS (both sources)
+**Patches applied:**
+- Line 18: `df.get()` → fixed with isinstance check. Reason: pandas `.get()` requires a column name as argument, crashes without one. Fix: `data = df if isinstance(df, pd.DataFrame) else df.get()`.
+- TC and PY numeric casting: `pd.to_numeric(..., errors='coerce')` applied to both TC and PY before index calculations to avoid arithmetic errors on string values.
+
+### `get_table.py`
+**Status:** function uses Shiny UI components.
+**Patches applied:**
+- Line 68: `data = df.get()` → fixed with isinstance check. Reason: pandas `.get()` requires a column name as argument, crashes without one. Fix: `data = df if isinstance(df, pd.DataFrame) else df.get()`.
+- Second `df.get()` call in return statement: replaced with `data`, which is already the unwrapped DataFrame from patch 1, avoiding a redundant and potentially crashing second call.
+- `data.map(lambda x: x == [])` → replaced with a per-column apply using isinstance check. Reason: applying a lambda cell-by-cell across the entire DataFrame raises TypeError on non-list cells (int, float) in some pandas versions. Fix: `count_empty_lists` function checks `isinstance(x, list) and len(x) == 0` safely per column.
+
+### `get_thematicevolution.py` / `get_thematic_evolution`
+**Patches applied:**
+- thematic_evolution – Lines 93–98: removed `reactive.Value(Mk)` wrapper — passing Mk directly to thematic_map. Reason: reactive.Value is a Shiny-specific object that crashes outside a running Shiny application with "No current reactive context". thematic_map already handles plain DataFrames via its own isinstance check.
+- thematic_evolution – Lines 87–88: added early return when timeslice returns empty dict. Reason: timeslice returns `{}` when PY is all NaN (PubMed), causing the subsequent for loop to silently skip and results to be None, crashing on `results['Nodes']` downstream.
+- get_thematic_evolution – Line 45: added None check on results after the `thematic_evolution()` call. Reason: thematic_evolution returns None when PY is all NaN or no topics are found — accessing `results['Nodes']` on None crashes with TypeError.
+- get_thematic_evolution – missing 'Nodes' key guard: thematic_evolution can also return `{"check": False}` (no 'Nodes' key) when one or more periods have zero topic clusters — typically because the chosen field is empty for the data source (e.g. Keywords Plus ID is exclusive to Web of Science and is always empty for OpenAlex/PubMed). Fix: check `not results.get("check", True) or "Nodes" not in results` before unpacking, instead of crashing with `KeyError: 'Nodes'`.
+- get_thematic_evolution – empty-result HTML generation: in both fallback cases above (results is None and missing 'Nodes'), the function previously returned None for the HTML network path, which the UI rendered as a broken "Not Found" page. Fix: generate a valid but empty pyvis.Network graph (no nodes/edges) and save it as a temporary HTML file, so the Map tab renders a blank canvas instead of an error.
+- get_thematic_evolution – TM return value: the third return value (TM, consumed by the "Time Slice 1/2" tabs) was set to None in the fallback cases above, causing "object of type 'NoneType' has no len()" in the UI, which calls `len()` on it. Fix: return an empty list `[]` instead of None.
+- timeslice – NaN PY guard: if PY is entirely NaN, return `{}` gracefully instead of crashing in `pd.cut`.
+- timeslice – dropna before pd.cut: drop rows with NaN PY before cutting to avoid non-monotonic bin errors.
+- timeslice – sorted breaks: wrap break points with `sorted(set(breaks))` to guarantee strictly increasing, duplicate-free bin edges regardless of whether the user-provided Cutting Year falls outside the actual PY range of the data (previous cause of "bins must increase monotonically"). If fewer than 3 unique edges remain, return `{}` instead of calling `pd.cut`.
+- timeslice – empty-period guard: even after deduplication, an out-of-range Cutting Year can produce a bin that is valid for `pd.cut` but contains zero rows. Downstream code (`min()`/`max()` on each period's PY values) crashed with "min() arg is an empty sequence" on such empty periods. Fix: filter out empty sub-DataFrames after splitting; if fewer than 2 non-empty periods remain, return `{}`.
+- normalize_to_minus1_1 – if all values are equal, return zeros instead of dividing by zero (range = 0 produces NaN everywhere).
+- thematic_evolution – resk_tuple unpacking: thematic_map returns exactly 5 values; original code tried to access index 5 which is always out of range.
+- thematic_evolution – nclust derivation: derived directly from clusters DataFrame row count instead of always being None.
+- thematic_evolution – inc_matrix accumulation: moved `pd.concat` and downstream processing outside the loop so all periods are accumulated before building the final result.
+**Known limitations:**
+- Keywords Plus (ID) as Text Source: always empty for OpenAlex/PubMed data (exclusive to Web of Science). With the patches above, this no longer crashes — it produces an empty Map/Table/Time Slice result instead. Use TI, AB, or DE for these data sources.
+- PubMed: if PY parsing from the eSummary pubdate field fails entirely, the function returns gracefully (an empty network graph + empty table + empty list, per the patches above).
+- OpenAlex: DE keywords are sparse; thematic evolution output may be minimal depending on the year range chosen.
+
+### `get_thematicmap.py`
+**Status:** PASS (both sources)
+**Patches applied:**
+- None check on thematic_map return value: thematic_map returns None when NetMatrix is empty — unpacking directly would crash with `TypeError: cannot unpack non-iterable NoneType`. Fix: capture full result first, check for None, return safe empty tuple before unpacking.
+- Variable rename: `map` shadowed the Python builtin `map()` function — renamed to `thematic_map_result` to avoid the collision.
+
+### `get_threefieldplot.py`
+**Status:** PASS (both sources)
+**Patches applied:**
+- None/empty check after each cocMatrix call: cocMatrix returns None when the field is empty (e.g. PubMed DE is always empty from eSummary API) — accessing `.shape` on None crashes with AttributeError. Fix: return empty FigureWidget gracefully if any of the three matrices is None or empty.
+- early return when n1, n2, or n3 is 0: if cocMatrix returns an empty DataFrame for any field, reassigning LM.index/columns with a mismatched range crashes with `ValueError: Length mismatch`. Fix: return empty FigureWidget early.
+- opacity normalization guard: original guard checked `weight_max > 0` but not `weight_max != weight_min` — if all nodes share the same weight, max - min is 0 and normalization produces NaN in every opacity value. Fix: added second condition to ensure range is non-zero before dividing, falling back to min_opacity for all nodes.
+- isolated node remapping: if id_map does not cover all values in `Edges['from']` or `Edges['to']`, `.map()` produces NaN — the Sankey crashes with float indices instead of int. Fix: drop edges whose endpoints are not in id_map before remapping, then cast to int.
+
+### `get_treemap.py`
+**Status:** PASS (both sources)
+**Patches applied:**
+- table_tag — `df.get()` → fixed with isinstance check. Reason: pandas `.get()` requires a column name as argument, crashes without one. Fix: `df.get() if hasattr(df, 'get') and callable(df.get) and not isinstance(df, pd.DataFrame) else df`.
+- table_tag — plain DataFrame passed to term_extraction: term_extraction does not accept Shiny reactive objects — extract plain DataFrame before passing for AB/TI fields.
+- table_tag — list filter before iterating: for non-DE/ID fields, added `isinstance(sublist, list)` check before iterating to avoid TypeError when sublist is a string or NaN.
+- table_tag — remove_terms applied to all tags: original code only applied remove_terms for some tags. Fix: apply remove_terms filter to the final word_counts dict regardless of tag.
+- get_treemap — safety check on empty word_counts: if table_tag returns an empty dict (e.g. PubMed DE is always empty), word_counts DataFrame is empty and `px.treemap` crashes. Fix: return empty FigureWidget and empty table gracefully.
+- table_tag — missing-column guard for non-WoS-proprietary fields (e.g. WC): same fix as in `get_wordcloud.py` — `if tag not in M.columns: return Counter()` before direct column access. Fixes `Error in analysis: 'WC'` on Subject Categories.
+- table_tag — literal "nan" string filtering for AB/TI fields: missing abstracts/titles sometimes arrive as the literal string "nan" rather than a true NaN (e.g. after a CSV/JSON round-trip). `term_extraction()` was tokenizing that string as a real word, producing a fake "nan" term that displaced or masked genuine terms (observed as a single "nan" block at 100% in the TreeMap on Abstracts). Fix: drop rows where the field is NaN or the literal string "nan" (case-insensitive) before calling `term_extraction()`, plus a second-layer filter stripping any stray "nan" tokens from already-extracted term lists.
+
+### `get_trendtopics.py`
+**Status:** PASS (both sources)
+**Patches applied:**
+- get_trend_topics — isinstance check for `df.get()`: extract plain DataFrame before passing to term_extraction — it does not accept Shiny reactive objects.
+- get_trend_topics — empty result guard: if field_by_year returns None or empty DataFrame, return empty FigureWidget and empty DataFrame gracefully instead of crashing on `px.scatter`.
+- field_by_year — isinstance check for `df.get()`: same pattern — unwrap reactive or use plain DataFrame directly.
+- field_by_year — cocMatrix None/empty guard: cocMatrix returns None when the field is empty (e.g. PubMed DE is always empty) — return empty DataFrame gracefully.
+- field_by_year — PY numeric conversion: PY is stored as string in ETL output — convert to numeric with `pd.to_numeric(..., errors='coerce')` before passing to `np.quantile` to avoid `TypeError: unsupported operand type(s) for -: 'str' and 'str'`.
+- field_by_year — safe_quantile empty array guard: if `np.repeat` produces an empty array (zero-frequency term), return `[nan, nan, nan]` gracefully instead of crashing in `np.quantile`.
+- field_by_year — timespan type guard: timespan may be passed as an integer (time_window) rather than a `[start, end]` list — `len()` on an int crashes with TypeError. Fix: check `isinstance(timespan, (list, tuple))` before calling `len()`, fall back to data range if not a valid list.
+- get_trend_topics — literal "nan" string filtering before term extraction: same root cause as above — for AB/TI fields, missing values stored as the literal string "nan" were being tokenized as a real term, producing a single fake "NAN" point on the plot that displaced genuine terms. Fix: drop rows where field_tt is NaN or the literal string "nan" (case-insensitive) before calling `term_extraction()`; return an empty result gracefully if no rows remain.
+- field_by_year — second-layer "nan" token stripping: even after the upstream row-level filter, a stray "nan" token could in principle survive inside an extracted term list alongside valid terms. Added a filter (dropna + list-comprehension check) to strip any such literal "nan" tokens before building the co-occurrence matrix with `cocMatrix()`.
+
+### `get_wordcloud.py`
+**Status:** PASS (both sources)
+**Patches applied:**
+- table_tag — isinstance check for `df.get()`: unwrap Shiny reactive or use plain DataFrame directly. Reason: pandas `.get()` requires a column name as argument, crashes without one.
+- table_tag — plain DataFrame passed to term_extraction: term_extraction does not accept Shiny reactive objects — extract plain DataFrame before passing for AB/TI fields.
+- table_tag — list filter before iterating: for non-DE/ID fields, added `isinstance(sublist, list)` check before iterating to avoid TypeError when sublist is a string or NaN.
+- table_tag — remove_terms applied to all tags: original code only applied remove_terms for some tags. Fix: apply remove_terms filter to the final word_counts dict regardless of tag.
+- get_wordcloud — empty word list guard: if sorted_words is empty (e.g. PubMed DE is always empty), write a minimal HTML file and return gracefully instead of crashing downstream.
+- table_tag — missing-column guard for non-WoS-proprietary fields (e.g. WC - Subject Categories): added `if tag not in M.columns: return Counter()` before `text_data = M[tag]`. Reason: WC is never created in the standardized schema for OpenAlex/PubMed (no WoS equivalent), so direct column access raised a raw `KeyError: 'WC'` instead of degrading gracefully like the ID/DE paths.
+
+### `get_wordfrequency.py`
+**Status:** PASS (both sources)
+**Patches applied:**
+- get_word_frequency — isinstance check for `df.get()`: extract plain DataFrame before passing to term_extraction — it does not accept Shiny reactive objects.
+- get_word_frequency — term_extraction empty vocabulary guard: term_extraction crashes with `ValueError: empty vocabulary` when the field column is entirely empty (e.g. PubMed DE is always empty from eSummary API). Fix: wrap in try/except and return empty FigureWidget and empty DataFrame gracefully.
+- get_word_frequency — empty TM column guard: if term_extraction succeeds but the TM column contains no terms, return empty results gracefully.
+- get_word_frequency — top_words type normalization: top_words may be passed as a plain int rather than a `[start, end]` list — indexing an int crashes with TypeError. Fix: normalize to `[0, n]` if a plain int is given.
+- get_word_frequency — column slice bounds clamping: if `top_words[0] >=` number of available columns, slicing crashes with IndexError. Fix: clamp start and end to valid range before slicing.
+- keyword_growth — empty data guard: if data is empty after filtering, `data['Year'].min()` returns NaN and `range(NaN, NaN)` crashes with TypeError. Fix: return empty DataFrame with just a Year column.
+- keyword_growth — safe split with type check: iterating over elements without type checking crashes with TypeError on non-string/non-list elements. Fix: `safe_split` returns empty list for unexpected types.
+- trim_years — empty year range guard: if year_range is empty, return empty Series immediately instead of producing inconsistent results.
+- get_word_frequency — missing-column guard before term_extraction: added `if field_wf not in df_plain.columns: return go.FigureWidget(go.Figure()), pd.DataFrame()`. Reason: unlike the other three files, this function calls `term_extraction()` unconditionally for any field_wf with no existence check, and only caught ValueError — a missing column (e.g. WC, if ever exposed in this widget) would have raised an unhandled KeyError.
+- get_word_frequency — broadened exception handling: extended the existing try/except ValueError around `term_extraction()` to also catch KeyError, as a defensive fallback alongside the explicit check above.
+- get_word_frequency — literal "nan" string filtering for AB/TI fields: same fix pattern as in `get_treemap.py`/`get_frequentwords.py`/`get_trendtopics.py` — drop rows where the field is NaN or the literal string "nan" before calling `term_extraction()`.
+- keyword_growth — literal "nan" token stripping: added a filter (`data['Term'].astype(str).str.strip().str.lower() != 'nan'`) to remove stray "nan" tokens from the expanded term list, covering both free-text (AB/TI) and delimiter-separated (e.g. DE/ID) fields that route through this function.
+- get_word_frequency — empty/degenerate keyword_growth result guard: added a check (`word_freq.empty or list(word_freq.columns) == ['Year']`) before attempting column slicing and plotting, to avoid building a chart from a result with no actual term columns.
+
+### `get_worldmapcollaboration.py`
+**Status:** PASS (both sources)
+**Patches applied:**
+- metaTagExtraction return handling: after calling `metaTagExtraction(df, "AU_CO")`, unwrap result with isinstance check — metaTagExtraction may return a Shiny reactive or a plain DataFrame.
+- AU_CO safe fill: `fillna("")` applied before exploding AU_CO to avoid NaN propagation when AU_CO is missing or empty.
+- Country normalization: corrections dict maps common abbreviations (USA, UK, SOUTH KOREA) to standardized names used in the world geometry dataset.
+- Network None/empty guard: if biblionetwork returns None or an empty result, return empty FigureWidget and empty DataFrame gracefully.
+- Safe centroid computation: Longitude and Latitude converted with `pd.to_numeric(..., errors='coerce').fillna(0)` to avoid NaN coordinates crashing edge drawing.
+- Manual coordinate fixes for UK and France (centroid falls in the ocean or overseas territories).
+- Singapore patch: Singapore is absent from the 110m Natural Earth dataset — added manually with hardcoded coordinates.
+- Safe edge width: `max(row['count'], 1)` prevents division by zero when computing edge width.
+**Known limitations:**
+- AU_CO is a derived column not produced by the ETL pipeline — metaTagExtraction cannot extract it from OpenAlex or PubMed data, so the collaboration map always returns an empty figure for both sources
+
+### `get_citeddocuments.py`
+**Status:** PASS (both sources)
+**Patches applied:**
+- `data = df.get()` → fixed with isinstance check. Reason: pandas `.get()` requires a column name as argument, crashes without one. Fix: `data = df if isinstance(df, pd.DataFrame) else df.get()`.
+- None check before unwrapping: if df is None, returns `(None, empty DataFrame)` gracefully.
+- Empty data check after unwrapping: if data is None or empty, returns `(None, empty DataFrame)` gracefully.
+- Required columns guard: if SR, TC, or PY are missing, fills with safe defaults (0 for numeric, "" for strings).
+- TC and PY numeric conversion: `pd.to_numeric(..., errors='coerce')` applied to both to avoid arithmetic errors on string values.
+- Division by zero prevention in TCperYear: `max((current_year + 1 - row['PY']), 1)` prevents division by zero for documents with missing or future PY.
+- Safe normalization: NormalizedTC groupby transform checks for zero or NaN mean before dividing.
+- Empty tab guard: if groupby aggregation produces an empty table, returns `(None, empty DataFrame)` gracefully.
+
+### `get_sourcesproduction.py`
+**Status:** PASS (both sources)
+**Patches applied:**
+- Line 18: `data = df.get()` → fixed with isinstance check. Reason: pandas `.get()` requires a column name as argument, crashes without one. Fix: `data = df if isinstance(df, pd.DataFrame) else df.get()`.
+- PY string extraction for `data["PY"]`: PubMed PY may contain full date strings (e.g. "2026 Jun 6") instead of plain year integers — `astype(int)` crashes on these. Fix: extract first 4-digit year with `str.extract(r'(\d{4})')` and `pd.to_numeric` before casting to int. Rows with unparseable PY are dropped.
+- WPY column name extraction for missing years: `WPY.columns` may also contain full date strings — extract 4-digit year from column names before comparing against the PY range to compute missing years.
+- WPY column renaming before sort: `WPY.columns.astype(int)` crashes on full date strings. Fix: rename columns by extracting the first 4 characters as a year string, then sort using a safe `int(x) if x.isdigit() else 0` key.
+**Known limitations:**
+- PubMed: PY field from eSummary API returns full date strings (e.g. "2026 Jun 6") rather than 4-digit years — year extraction is required before any arithmetic on PY
